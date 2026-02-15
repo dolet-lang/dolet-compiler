@@ -63,7 +63,7 @@ fun print(value: bool):
 
 # Character
 fun print(value: char):
-    IOOps.io_println(@"{value}")
+    IOOps.io_print_char(value)
 
 # ==========================================
 # Print Without Newline
