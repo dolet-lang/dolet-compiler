@@ -270,9 +270,29 @@ fun collect_strings(node: i64):
     if nt == NODE_MATCH:
         collect_strings(Memory.read_i64(node + 8))
         collect_strings_list(Memory.read_i64(node + 16))
+        collect_strings_list(Memory.read_i64(node + 24))
         return
     if nt == NODE_CASE:
         collect_strings_list(Memory.read_i64(node + 16))
+        return
+    if nt == NODE_STRUCT_INST:
+        # field_vals node_list at +16, each field_val has value expr at +16
+        fvl: i64 = Memory.read_i64(node + 16)
+        if fvl != 0:
+            fvc: i32 = nl_count(fvl)
+            fi: i32 = 0
+            while fi < fvc:
+                fv: i64 = nl_get(fvl, fi)
+                collect_strings(Memory.read_i64(fv + 16))
+                fi = fi + 1
+        return
+    if nt == NODE_STRUCT_FIELD:
+        # default value at +24
+        collect_strings(Memory.read_i64(node + 24))
+        return
+    if nt == NODE_FIELD_VAL:
+        # Keyword arg in struct construction: name at +8, value at +16
+        collect_strings(Memory.read_i64(node + 16))
         return
 
 fun collect_all_strings(ast: i64):
@@ -296,6 +316,15 @@ fun gen_global_var_decls():
         gnode: i64 = Memory.read_i64(g_global_var_nodes + off)
 
         vtype: str = Memory.read_i64(gnode + 8) as str
+
+        # If type is empty (const without annotation), infer from value expression
+        if str_eq(vtype, "") == 1:
+            val_node_infer: i64 = Memory.read_i64(gnode + 24)
+            if val_node_infer != 0:
+                vtype = infer_expr_type(val_node_infer)
+            if str_eq(vtype, "") == 1 or str_eq(vtype, "unknown") == 1:
+                vtype = "i64"
+
         mt: str = mlir_type(vtype)
 
         # Create unique mlir name

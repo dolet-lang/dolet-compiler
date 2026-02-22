@@ -22,7 +22,10 @@ fun parse_fun_def(is_async: i64) -> i64:
 
     while cur_kind() != TK_RPAREN:
         pname: str = cur_val()
-        eat(TK_IDENT)
+        if cur_kind() == TK_SELF:
+            advance()
+        else:
+            eat(TK_IDENT)
 
         # Optional nullable: name?
         nullable: i64 = 0
@@ -50,13 +53,16 @@ fun parse_fun_def(is_async: i64) -> i64:
         advance()
         ret_type = parse_type_name()
 
-    # Colon before body
-    eat(TK_COLON)
+    # Colon before body (optional for abstract/trait methods)
+    if cur_kind() == TK_COLON:
+        advance()
+        skip_newlines()
+        body: i64 = parse_indented_block(fi)
+        return mk_fun_def(name, params, ret_type, body, 0, 0, "", is_async)
 
-    skip_newlines()
-    body: i64 = parse_indented_block(fi)
-
-    return mk_fun_def(name, params, ret_type, body, 0, 0, "", is_async)
+    # No colon = abstract method (trait method signature)
+    body2: i64 = mk_node_list(4)
+    return mk_fun_def(name, params, ret_type, body2, 0, 0, "", is_async)
 
 # ==========================================
 # Struct Declaration

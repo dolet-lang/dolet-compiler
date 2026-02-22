@@ -1,0 +1,42 @@
+##############################
+# Test 06: Functions
+# Tests function definitions, params, return types
+##############################
+
+# Basic function
+fun greet(name: str) -> str:
+    return @"Hello, {name}!"
+
+print(greet("World"))
+
+# Function with return type
+fun add(a: i32, b: i32) -> i32:
+    return a + b
+
+print(add(10, 20))
+
+# Function without return
+fun say_hello():
+    print("Hello from function!")
+
+say_hello()
+
+# Nested function calls
+fun multiply(a: i32, b: i32) -> i32:
+    return a * b
+
+print(multiply(add(2, 3), 4))
+
+# Recursive function
+fun factorial(n: i32) -> i32:
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+print(factorial(5))
+
+# Function with f-string
+fun describe(name: str, age: i32) -> str:
+    return @"{name} is {age} years old"
+
+print(describe("Ali", 25))

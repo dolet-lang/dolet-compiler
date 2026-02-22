@@ -1,0 +1,43 @@
+##############################
+# Test 08: Enums
+# Tests enum declarations and usage
+##############################
+
+# Basic enum
+enum Direction:
+    UP
+    DOWN
+    LEFT
+    RIGHT
+
+dir: i32 = Direction.UP
+print(dir)
+
+dir = Direction.RIGHT
+print(dir)
+
+# Enum comparison
+if dir == Direction.RIGHT:
+    print("Going right!")
+
+# Enum in match
+enum Status:
+    PENDING
+    ACTIVE
+    COMPLETED
+    FAILED
+
+fun handle_status(s: i32):
+    match s:
+        case Status.PENDING:
+            print("Waiting...")
+        case Status.ACTIVE:
+            print("In progress")
+        case Status.COMPLETED:
+            print("Done!")
+        case Status.FAILED:
+            print("Error occurred")
+
+handle_status(Status.PENDING)
+handle_status(Status.ACTIVE)
+handle_status(Status.COMPLETED)

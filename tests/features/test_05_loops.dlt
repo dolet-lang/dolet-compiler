@@ -1,0 +1,35 @@
+##############################
+# Test 05: Loops
+# Tests for, while, break, continue
+##############################
+
+# For loop with range
+print("for 0 to 5:")
+for i in 0 to 5:
+    print(i)
+
+# For loop with step
+print("for 0 to 20 step 5:")
+for i in 0 to 20 step 5:
+    print(i)
+
+# While loop
+print("while loop:")
+x: i32 = 0
+while x < 5:
+    print(x)
+    x++
+
+# Break
+print("break at 3:")
+for i in 0 to 10:
+    if i == 3:
+        break
+    print(i)
+
+# Continue
+print("skip even:")
+for i in 0 to 5:
+    if i % 2 == 0:
+        continue
+    print(i)

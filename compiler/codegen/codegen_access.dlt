@@ -12,6 +12,11 @@ fun gen_field_access(node: i64) -> str:
     obj_name: str = Memory.read_i64(node + 8) as str
     field_name: str = Memory.read_i64(node + 16) as str
 
+    # Check if this is enum access (e.g., Direction.UP)
+    if is_enum_type(obj_name) == 1:
+        eidx: i32 = get_enum_value_index(obj_name, field_name)
+        return emit_const_i32(eidx)
+
     obj_type: str = get_var_type(obj_name)
 
     # ptr[T].value — dereference typed pointer
@@ -34,7 +39,7 @@ fun gen_field_access(node: i64) -> str:
     # GEP to field
     struct_mlir: str = get_struct_mlir_type(obj_type)
     fp: str = new_tmp()
-    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(fp, " = llvm.getelementptr "), struct_mlir), Str.concat(Str.concat(", ", obj_ptr), Str.concat("[0, ", Str.concat(Convert.i64_to_str(fidx as i64), "]")))), " : (!llvm.ptr) -> !llvm.ptr"))
+    emit_ind(Str.concat(Str.concat(Str.concat(fp, " = llvm.getelementptr "), obj_ptr), Str.concat(Str.concat("[0, ", Str.concat(Convert.i64_to_str(fidx as i64), "]")), Str.concat(" : (!llvm.ptr) -> !llvm.ptr, ", struct_mlir))))
 
     # Load field value
     val: str = emit_load(fp, mt)
@@ -53,7 +58,7 @@ fun gen_self_field_access(node: i64) -> str:
 
     struct_mlir: str = get_struct_mlir_type(sname)
     fp: str = new_tmp()
-    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(fp, " = llvm.getelementptr "), struct_mlir), Str.concat(", %self[0, ", Str.concat(Convert.i64_to_str(fidx as i64), "]"))), " : (!llvm.ptr) -> !llvm.ptr"))
+    emit_ind(Str.concat(Str.concat(fp, " = llvm.getelementptr %self[0, "), Str.concat(Str.concat(Convert.i64_to_str(fidx as i64), "] : (!llvm.ptr) -> !llvm.ptr, "), struct_mlir)))
 
     val: str = emit_load(fp, mt)
     return val
@@ -64,6 +69,11 @@ fun gen_self_field_access(node: i64) -> str:
 fun gen_static_field_access(node: i64) -> str:
     sname: str = Memory.read_i64(node + 8) as str
     fname: str = Memory.read_i64(node + 16) as str
+
+    # Check if this is enum access (e.g., Direction.UP)
+    if is_enum_type(sname) == 1:
+        eidx: i32 = get_enum_value_index(sname, fname)
+        return emit_const_i32(eidx)
 
     full: str = Str.concat(Str.concat(sname, "__"), fname)
     ga: str = emit_addr_of(full)
@@ -235,10 +245,14 @@ fun gen_instance_method_call(node: i64) -> str:
     args_list: i64 = Memory.read_i64(node + 24)
 
     # Get struct type
-    obj_type: str = get_var_type(obj_name)
-
-    # Load object pointer as first arg (self)
-    obj_ptr: str = gen_var_load(obj_name, obj_type)
+    obj_type: str = ""
+    obj_ptr: str = ""
+    if str_eq(obj_name, "self") == 1:
+        obj_type = g_cur_method_struct
+        obj_ptr = "%self"
+    else:
+        obj_type = get_var_type(obj_name)
+        obj_ptr = gen_var_load(obj_name, obj_type)
 
     # Mangled name
     mangled: str = Str.concat(Str.concat(obj_type, "_"), mname)

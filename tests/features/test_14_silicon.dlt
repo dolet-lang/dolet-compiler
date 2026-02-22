@@ -1,0 +1,19 @@
+##############################
+# Test 14: Silicon Functions (Hardware Intrinsics)
+# Tests @sqrt and other builtin functions
+##############################
+
+# @sqrt - hardware instruction
+x: f64 = 16.0
+y: f64 = @sqrt(x)
+print(y)
+
+# @sqrt with f32
+x32: f32 = 25.0
+y32: f32 = @sqrt(x32)
+print(y32)
+
+# @fabs - absolute value
+neg: f64 = -42.5
+pos: f64 = @fabs(neg)
+print(pos)

@@ -1,0 +1,10 @@
+##############################
+# Minimal struct test
+##############################
+
+struct Point:
+    x: i64
+    y: i64
+
+p: Point = Point(x=10, y=20)
+print(Convert.i64_to_str(p.x))

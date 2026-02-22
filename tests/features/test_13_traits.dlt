@@ -1,0 +1,19 @@
+##############################
+# Test 13: Traits
+# Tests trait declaration and implementation
+##############################
+
+# Trait declaration
+trait Display:
+    fun to_str() -> str
+
+struct Animal:
+    name: str
+    sound: str
+
+impl Animal:
+    fun to_str() -> str:
+        return @"{self.name} says {self.sound}"
+
+a: Animal = Animal(name="Cat", sound="Meow")
+print(a.to_str())

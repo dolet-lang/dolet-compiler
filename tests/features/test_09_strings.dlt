@@ -1,0 +1,24 @@
+##############################
+# Test 09: Strings
+# Tests string interpolation, concatenation
+##############################
+
+# Basic string
+msg: str = "Hello World"
+print(msg)
+
+# String interpolation (f-strings)
+name: str = "Ali"
+age: i32 = 25
+score: i32 = 100
+
+print(@"Name: {name}")
+print(@"Age: {age}, Score: {score}")
+doubled: i32 = score * 2
+print(@"Double: {doubled}")
+
+# String concatenation
+first: str = "Hello"
+second: str = "World"
+full: str = Str.concat(first, Str.concat(" ", second))
+print(full)

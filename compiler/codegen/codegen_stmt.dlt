@@ -35,7 +35,22 @@ fun gen_assignment(node: i64):
         value_result = implicit_cast(value_result, actual_type, vt2)
 
     # Store to global or local
-    if is_global_var(name) == 1:
+    # Check if a local variable shadows this global (same fix as gen_var_load)
+    is_local_shadow: i32 = 0
+    if is_global_var(name) == 1 and g_in_function == 1:
+        vi: i32 = g_var_count - 1
+        while vi >= 0:
+            voff: i64 = (vi as i64) * 8
+            vn: str = Memory.read_i64(g_var_names + voff) as str
+            if str_eq(vn, name) == 1:
+                vpoff: i64 = (vi as i64) * 4
+                vp: i32 = Memory.read_i32(g_var_is_param + vpoff)
+                if vp == 0:
+                    is_local_shadow = 1
+                vi = -1
+            vi = vi - 1
+
+    if is_global_var(name) == 1 and is_local_shadow == 0:
         ga: str = emit_addr_of(mn)
         emit_store(value_result, ga, mt2)
     else:
@@ -49,6 +64,19 @@ fun gen_field_assignment(node: i64):
     field_name: str = Memory.read_i64(node + 16) as str
     val_node: i64 = Memory.read_i64(node + 24)
 
+    # Self field assignment: self.field = value
+    if str_eq(obj_name, "self") == 1:
+        sname: str = g_cur_method_struct
+        ftype: str = get_field_type(sname, field_name)
+        fidx: i32 = get_field_index(sname, field_name)
+        mt: str = mlir_type(ftype)
+        struct_mlir: str = get_struct_mlir_type(sname)
+        fp: str = new_tmp()
+        emit_ind(Str.concat(Str.concat(fp, " = llvm.getelementptr %self[0, "), Str.concat(Str.concat(Convert.i64_to_str(fidx as i64), "] : (!llvm.ptr) -> !llvm.ptr, "), struct_mlir)))
+        val: str = gen_expr(val_node, ftype)
+        emit_store(val, fp, mt)
+        return
+
     # Get struct type of object
     obj_type: str = get_var_type(obj_name)
 
@@ -58,25 +86,25 @@ fun gen_field_assignment(node: i64):
             elem_t: str = ptr_elem_type(obj_type)
             elem_mt: str = mlir_type(elem_t)
             ptr_val: str = gen_var_load(obj_name, obj_type)
-            val: str = gen_expr(val_node, elem_t)
-            emit_store(val, ptr_val, elem_mt)
+            val2: str = gen_expr(val_node, elem_t)
+            emit_store(val2, ptr_val, elem_mt)
             return
 
-    ftype: str = get_field_type(obj_type, field_name)
-    fidx: i32 = get_field_index(obj_type, field_name)
-    mt: str = mlir_type(ftype)
+    ftype2: str = get_field_type(obj_type, field_name)
+    fidx2: i32 = get_field_index(obj_type, field_name)
+    mt2: str = mlir_type(ftype2)
 
     # Load object pointer
     obj_ptr: str = gen_var_load(obj_name, obj_type)
 
     # GEP to field
-    struct_mlir: str = get_struct_mlir_type(obj_type)
-    fp: str = new_tmp()
-    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(fp, " = llvm.getelementptr "), struct_mlir), Str.concat(Str.concat(", ", obj_ptr), Str.concat("[0, ", Str.concat(Convert.i64_to_str(fidx as i64), "]")))), " : (!llvm.ptr) -> !llvm.ptr"))
+    struct_mlir2: str = get_struct_mlir_type(obj_type)
+    fp2: str = new_tmp()
+    emit_ind(Str.concat(Str.concat(Str.concat(fp2, " = llvm.getelementptr "), obj_ptr), Str.concat(Str.concat("[0, ", Str.concat(Convert.i64_to_str(fidx2 as i64), "]")), Str.concat(" : (!llvm.ptr) -> !llvm.ptr, ", struct_mlir2))))
 
     # Generate and store value
-    val2: str = gen_expr(val_node, ftype)
-    emit_store(val2, fp, mt)
+    val3: str = gen_expr(val_node, ftype2)
+    emit_store(val3, fp2, mt2)
 
 # ==========================================
 # Static Field Assignment (Struct.field = value)
@@ -419,14 +447,53 @@ fun gen_match_stmt(node: i64):
 
         # Generate pattern comparison (first pattern for now)
         pc: i32 = nl_count(patterns)
+        skip_cmp: i32 = 0
+        pat_val: str = ""
         if pc > 0:
             pat: i64 = nl_get(patterns, 0)
-            pat_val: str = gen_expr(pat, et)
-            cmp: str = new_tmp()
-            emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(Str.concat(cmp, " = llvm.icmp \"eq\" "), match_val), Str.concat(", ", pat_val)), " : "), mt))
-            emit_ind(Str.concat(Str.concat(Str.concat(Str.concat("llvm.cond_br ", cmp), ", "), then_lbl), Str.concat(", ", next_lbl)))
-        else:
-            emit_ind(Str.concat("llvm.br ", then_lbl))
+            pat_nt: i32 = nd_type(pat)
+            if pat_nt == NODE_PATTERN:
+                pptype: str = Memory.read_i64(pat + 8) as str
+                if str_eq(pptype, "enum") == 1:
+                    pp_ename: str = Memory.read_i64(pat + 56) as str
+                    pp_vname: str = Memory.read_i64(pat + 64) as str
+                    pp_idx: i32 = get_enum_value_index(pp_ename, pp_vname)
+                    pat_val = emit_const_i32(pp_idx)
+                elif str_eq(pptype, "value") == 1:
+                    pp_str_val: str = Memory.read_i64(pat + 16) as str
+                    pp_tmp: str = new_tmp()
+                    if str_eq(mt, "!llvm.ptr") == 1:
+                        pat_val = gen_expr(pat, et)
+                    else:
+                        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(pp_tmp, " = llvm.mlir.constant("), pp_str_val), Str.concat(" : ", mt)), Str.concat(") : ", mt)))
+                        pat_val = pp_tmp
+                elif str_eq(pptype, "range") == 1:
+                    pp_start_str: str = Memory.read_i64(pat + 24) as str
+                    pp_end_str: str = Memory.read_i64(pat + 32) as str
+                    pp_start_t: str = new_tmp()
+                    pp_end_t: str = new_tmp()
+                    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(pp_start_t, " = llvm.mlir.constant("), pp_start_str), Str.concat(" : ", mt)), Str.concat(") : ", mt)))
+                    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(pp_end_t, " = llvm.mlir.constant("), pp_end_str), Str.concat(" : ", mt)), Str.concat(") : ", mt)))
+                    pp_ge: str = new_tmp()
+                    pp_le: str = new_tmp()
+                    pp_and: str = new_tmp()
+                    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(pp_ge, " = llvm.icmp \"sge\" "), match_val), Str.concat(", ", pp_start_t)), Str.concat(" : ", mt)))
+                    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(pp_le, " = llvm.icmp \"sle\" "), match_val), Str.concat(", ", pp_end_t)), Str.concat(" : ", mt)))
+                    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(pp_and, " = llvm.and "), pp_ge), Str.concat(", ", pp_le)), " : i1"))
+                    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat("llvm.cond_br ", pp_and), ", "), then_lbl), Str.concat(", ", next_lbl)))
+                    skip_cmp = 1
+                else:
+                    pat_val = emit_const_i32(0)
+            else:
+                pat_val = gen_expr(pat, et)
+
+        if skip_cmp == 0:
+            if pc > 0:
+                cmp: str = new_tmp()
+                emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(Str.concat(cmp, " = llvm.icmp \"eq\" "), match_val), Str.concat(", ", pat_val)), " : "), mt))
+                emit_ind(Str.concat(Str.concat(Str.concat(Str.concat("llvm.cond_br ", cmp), ", "), then_lbl), Str.concat(", ", next_lbl)))
+            else:
+                emit_ind(Str.concat("llvm.br ", then_lbl))
 
         emit(Str.concat("  ", Str.concat(then_lbl, ":")))
         gen_block(body)
@@ -473,12 +540,51 @@ fun gen_match_expr(node: i64, expected: str) -> str:
         next_lbl: str = new_label()
 
         pc: i32 = nl_count(patterns)
+        skip_cmp2: i32 = 0
+        pat_val: str = ""
         if pc > 0:
             pat: i64 = nl_get(patterns, 0)
-            pat_val: str = gen_expr(pat, et)
-            cmp: str = new_tmp()
-            emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(Str.concat(cmp, " = llvm.icmp \"eq\" "), match_val), Str.concat(", ", pat_val)), " : "), mt))
-            emit_ind(Str.concat(Str.concat(Str.concat(Str.concat("llvm.cond_br ", cmp), ", "), then_lbl), Str.concat(", ", next_lbl)))
+            pat_nt2: i32 = nd_type(pat)
+            if pat_nt2 == NODE_PATTERN:
+                pptype2: str = Memory.read_i64(pat + 8) as str
+                if str_eq(pptype2, "enum") == 1:
+                    pp_ename2: str = Memory.read_i64(pat + 56) as str
+                    pp_vname2: str = Memory.read_i64(pat + 64) as str
+                    pp_idx2: i32 = get_enum_value_index(pp_ename2, pp_vname2)
+                    pat_val = emit_const_i32(pp_idx2)
+                elif str_eq(pptype2, "value") == 1:
+                    pp_str_val2: str = Memory.read_i64(pat + 16) as str
+                    pp_tmp2: str = new_tmp()
+                    if str_eq(mt, "!llvm.ptr") == 1:
+                        pat_val = gen_expr(pat, et)
+                    else:
+                        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(pp_tmp2, " = llvm.mlir.constant("), pp_str_val2), Str.concat(" : ", mt)), Str.concat(") : ", mt)))
+                        pat_val = pp_tmp2
+                elif str_eq(pptype2, "range") == 1:
+                    pp_start_str2: str = Memory.read_i64(pat + 24) as str
+                    pp_end_str2: str = Memory.read_i64(pat + 32) as str
+                    pp_start_t2: str = new_tmp()
+                    pp_end_t2: str = new_tmp()
+                    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(pp_start_t2, " = llvm.mlir.constant("), pp_start_str2), Str.concat(" : ", mt)), Str.concat(") : ", mt)))
+                    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(pp_end_t2, " = llvm.mlir.constant("), pp_end_str2), Str.concat(" : ", mt)), Str.concat(") : ", mt)))
+                    pp_ge2: str = new_tmp()
+                    pp_le2: str = new_tmp()
+                    pp_and2: str = new_tmp()
+                    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(pp_ge2, " = llvm.icmp \"sge\" "), match_val), Str.concat(", ", pp_start_t2)), Str.concat(" : ", mt)))
+                    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(pp_le2, " = llvm.icmp \"sle\" "), match_val), Str.concat(", ", pp_end_t2)), Str.concat(" : ", mt)))
+                    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(pp_and2, " = llvm.and "), pp_ge2), Str.concat(", ", pp_le2)), " : i1"))
+                    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat("llvm.cond_br ", pp_and2), ", "), then_lbl), Str.concat(", ", next_lbl)))
+                    skip_cmp2 = 1
+                else:
+                    pat_val = emit_const_i32(0)
+            else:
+                pat_val = gen_expr(pat, et)
+
+        if skip_cmp2 == 0:
+            if pc > 0:
+                cmp: str = new_tmp()
+                emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(Str.concat(cmp, " = llvm.icmp \"eq\" "), match_val), Str.concat(", ", pat_val)), " : "), mt))
+                emit_ind(Str.concat(Str.concat(Str.concat(Str.concat("llvm.cond_br ", cmp), ", "), then_lbl), Str.concat(", ", next_lbl)))
 
         emit(Str.concat("  ", Str.concat(then_lbl, ":")))
         gen_block(body)
@@ -504,7 +610,8 @@ fun gen_var_decl(node: i64):
     val_node: i64 = Memory.read_i64(node + 24)
 
     # Skip global vars (already declared in module header)
-    if is_global_var(name) == 1:
+    # But only skip if we're not inside a function — local vars should shadow globals
+    if is_global_var(name) == 1 and g_in_function == 0:
         return
 
     # Fix: parser stores "type" for bool/int/float/string keywords — use inferred type

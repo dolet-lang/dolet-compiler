@@ -168,9 +168,39 @@ fun parse_statement() -> i64:
     if k == TK_SUPER:
         return parse_expression()
 
-    # Self as statement (self.method() or self.field = ...)
+    # Self as statement (self.method() or self.field = ... or self.field += ...)
     if k == TK_SELF:
-        return parse_expression()
+        advance()
+        if cur_kind() == TK_DOT:
+            advance()
+            sfname: str = cur_val()
+            eat(TK_IDENT)
+            # self.method()
+            if cur_kind() == TK_LPAREN:
+                sma: i64 = parse_arg_list()
+                return mk_inst_method("self", sfname, sma)
+            # self.field = expr
+            if cur_kind() == TK_ASSIGN:
+                advance()
+                sfval: i64 = parse_expression()
+                return mk_field_assign("self", sfname, sfval)
+            # self.field += expr or self.field -= expr
+            if cur_kind() == TK_PLUS_ASSIGN or cur_kind() == TK_MINUS_ASSIGN or cur_kind() == TK_MULT_ASSIGN or cur_kind() == TK_DIV_ASSIGN:
+                sop: i32 = cur_kind()
+                advance()
+                scval: i64 = parse_expression()
+                sbop: str = "+"
+                if sop == TK_MINUS_ASSIGN:
+                    sbop = "-"
+                elif sop == TK_MULT_ASSIGN:
+                    sbop = "*"
+                elif sop == TK_DIV_ASSIGN:
+                    sbop = "/"
+                scombined: i64 = mk_binary_op(sbop, mk_self_field(sfname), scval)
+                return mk_field_assign("self", sfname, scombined)
+            # Just self.field as expression statement
+            return mk_self_field(sfname)
+        return mk_self()
 
     # Identifier: var decl, assignment, function call, method call
     if k == TK_IDENT:

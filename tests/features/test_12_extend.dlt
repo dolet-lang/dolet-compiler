@@ -1,0 +1,20 @@
+##############################
+# Test 12: Extend Blocks
+# Tests extending existing types with new methods
+##############################
+
+# Extend a struct with additional methods
+struct Vector2:
+    x: f32
+    y: f32
+
+extend Vector2:
+    fun length() -> f32:
+        return @sqrt(self.x * self.x + self.y * self.y)
+
+    fun to_str() -> str:
+        return @"({self.x}, {self.y})"
+
+v: Vector2 = Vector2(x=3.0, y=4.0)
+print(v.to_str())
+print(v.length())

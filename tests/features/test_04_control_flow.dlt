@@ -1,0 +1,49 @@
+##############################
+# Test 04: Control Flow
+# Tests if/elif/else, match, ternary
+##############################
+
+# If/Else
+x: i32 = 15
+if x > 10:
+    print("x is big")
+elif x > 5:
+    print("x is medium")
+else:
+    print("x is small")
+
+# Else if variant
+y: i32 = 7
+if y > 10:
+    print("y is big")
+else if y > 5:
+    print("y is medium")
+else:
+    print("y is small")
+
+# Match statement
+z: i32 = 2
+match z:
+    case 1:
+        print("One")
+    case 2, 3:
+        print("Two or Three")
+    case 4:
+        print("Four")
+    else:
+        print("Something else")
+
+# Range match
+w: i32 = 7
+match w:
+    case 1..5:
+        print("1 to 5")
+    case 6..10:
+        print("6 to 10")
+    else:
+        print("out of range")
+
+# Ternary expression
+age: i32 = 20
+result: str = "adult" if age >= 18 else "minor"
+print(result)

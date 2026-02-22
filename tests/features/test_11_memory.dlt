@@ -1,0 +1,27 @@
+##############################
+# Test 11: Memory Operations
+# Tests Memory struct operations (auto-imported runtime)
+##############################
+
+# Allocate memory
+ptr: i64 = Memory.malloc_zeroed(64)
+print(@"Allocated at: {ptr}")
+
+# Write and read i32
+Memory.write_i32(ptr, 42)
+val: i32 = Memory.read_i32(ptr)
+print(@"i32 value: {val}")
+
+# Write and read i64
+Memory.write_i64(ptr + 8, 123456789)
+val64: i64 = Memory.read_i64(ptr + 8)
+print(@"i64 value: {val64}")
+
+# Write and read i8
+Memory.write_i8(ptr + 16, 65)
+val8: i8 = Memory.read_i8(ptr + 16)
+print(@"i8 value: {val8}")
+
+# Free memory
+Memory.free(ptr)
+print("Memory freed!")

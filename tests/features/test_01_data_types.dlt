@@ -1,0 +1,60 @@
+##############################
+# Test 01: Data Types
+# Tests all basic data types from DOLET_LANGUAGE_FEATURES.md
+##############################
+
+# Signed integers
+a8: i8 = 127
+a16: i16 = 32767
+a32: i32 = 100
+a64: i64 = 999999
+a128: i128 = 123456789
+
+print(a8)
+print(a16)
+print(a32)
+print(a64)
+print(a128)
+
+# Unsigned integers
+u8v: u8 = 255
+u16v: u16 = 65535
+u32v: u32 = 100
+u64v: u64 = 999999
+u128v: u128 = 123456789
+
+print(u8v)
+print(u16v)
+print(u32v)
+print(u64v)
+print(u128v)
+
+# Floating point
+f32v: f32 = 3.14
+f64v: f64 = 6.28
+
+print(f32v)
+print(f64v)
+
+# String
+sv: str = "Hello Dolet"
+print(sv)
+
+# Char
+cv: char = 'A'
+print(cv)
+
+# Bool
+bv: bool = true
+print(bv)
+
+# Number literals
+decimal: i32 = 42
+hex_val: i32 = 0xFF
+bin_val: i32 = 0b1010
+oct_val: i32 = 0o755
+
+print(decimal)
+print(hex_val)
+print(bin_val)
+print(oct_val)

@@ -1,0 +1,63 @@
+##############################
+# Test 03: Operators
+# Tests arithmetic, comparison, logical, bitwise, compound assignment
+##############################
+
+# Arithmetic
+a: i32 = 10
+b: i32 = 3
+
+print(a + b)
+print(a - b)
+print(a * b)
+print(a / b)
+print(a % b)
+
+# Increment/Decrement
+c: i32 = 5
+c++
+print(c)
+c--
+print(c)
+
+# Compound assignment
+d: i32 = 10
+d += 5
+print(d)
+d -= 3
+print(d)
+d *= 2
+print(d)
+d /= 4
+print(d)
+
+# Comparison
+print(10 == 10)
+print(10 != 5)
+print(10 > 5)
+print(5 < 10)
+print(10 >= 10)
+print(5 <= 10)
+
+# Logical
+print(true && true)
+print(true || false)
+print(!false)
+
+# Bitwise
+x: i32 = 12
+y: i32 = 10
+print(x & y)
+print(x | y)
+print(x ^ y)
+print(x << 2)
+print(x >> 1)
+
+# Type casting
+fv: f64 = 3.14
+iv: i32 = fv as i32
+print(iv)
+
+iv2: i32 = 42
+fv2: f64 = iv2 as f64
+print(fv2)

@@ -1,0 +1,35 @@
+##############################
+# Test 02: Variables & Constants
+# Tests variable declarations, type inference, constants
+##############################
+
+# Type inference
+name = "Dolet"
+age = 25
+pi = 3.14159
+
+print(name)
+print(age)
+print(pi)
+
+# Explicit type annotation
+score: i32 = 100
+ratio: f64 = 3.14
+letter: char = 'A'
+
+print(score)
+print(ratio)
+print(letter)
+
+# Constants
+const PI = 3.14159
+const MAX_SIZE: i32 = 1000
+
+print(PI)
+print(MAX_SIZE)
+
+# Mutability
+x = 10
+print(x)
+x = 20
+print(x)

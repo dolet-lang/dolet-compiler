@@ -59,6 +59,14 @@ fun is_ptr_type(t: str) -> i32:
         return 1
     if is_struct_type(t) == 1:
         return 1
+    # Check for ptr[T] types (e.g. ptr[i8], ptr[i32])
+    tlen: i64 = Memory.strlen(t)
+    if tlen >= 5:
+        if Memory.read_i8(t as i64) == 112:
+            if Memory.read_i8((t as i64) + 1) == 116:
+                if Memory.read_i8((t as i64) + 2) == 114:
+                    if Memory.read_i8((t as i64) + 3) == 91:
+                        return 1
     return 0
 
 # ==========================================
@@ -242,6 +250,39 @@ fun infer_expr_type(node: i64) -> str:
         return rt2
 
     if ntype == NODE_FIELD_ACCESS:
+        fa_obj: str = Memory.read_i64(node + 8) as str
+        fa_field: str = Memory.read_i64(node + 16) as str
+        if is_enum_type(fa_obj) == 1:
+            return "i32"
+        fa_obj_type: str = get_var_type(fa_obj)
+        if str_eq(fa_obj_type, "") == 0 and str_eq(fa_obj_type, "unknown") == 0:
+            fa_ft: str = get_field_type(fa_obj_type, fa_field)
+            if str_eq(fa_ft, "") == 0 and str_eq(fa_ft, "unknown") == 0:
+                return fa_ft
+        return "unknown"
+
+    if ntype == NODE_SELF_FIELD:
+        sf_field: str = Memory.read_i64(node + 8) as str
+        sf_struct: str = g_cur_method_struct
+        if str_eq(sf_struct, "") == 0:
+            sf_ft: str = get_field_type(sf_struct, sf_field)
+            if str_eq(sf_ft, "") == 0 and str_eq(sf_ft, "unknown") == 0:
+                return sf_ft
+        return "unknown"
+
+    if ntype == NODE_INST_METHOD:
+        im_obj: str = Memory.read_i64(node + 8) as str
+        im_mname: str = Memory.read_i64(node + 16) as str
+        im_obj_type: str = ""
+        if str_eq(im_obj, "self") == 1:
+            im_obj_type = g_cur_method_struct
+        else:
+            im_obj_type = get_var_type(im_obj)
+        if str_eq(im_obj_type, "") == 0 and str_eq(im_obj_type, "unknown") == 0:
+            im_mangled: str = Str.concat(Str.concat(im_obj_type, "_"), im_mname)
+            im_rt: str = get_fun_ret_type(im_mangled)
+            if str_eq(im_rt, "unknown") == 0 and str_eq(im_rt, "") == 0:
+                return im_rt
         return "unknown"
 
     if ntype == NODE_ARRAY_LIT or ntype == NODE_LIST_LIT:
@@ -249,6 +290,15 @@ fun infer_expr_type(node: i64) -> str:
 
     if ntype == NODE_MAP_LIT:
         return "ptr"
+
+    if ntype == NODE_ENUM_ACCESS:
+        return "i32"
+
+    if ntype == NODE_STATIC_FIELD:
+        sf_class: str = Memory.read_i64(node + 8) as str
+        if is_enum_type(sf_class) == 1:
+            return "i32"
+        return "unknown"
 
     return "unknown"
 

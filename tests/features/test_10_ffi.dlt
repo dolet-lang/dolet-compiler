@@ -1,0 +1,12 @@
+##############################
+# Test 10: FFI (Foreign Function Interface)
+# Tests extern block and calling external functions
+##############################
+
+# Extern function declaration
+extern lib "user32.dll":
+    fun MessageBoxA(hwnd: i64, text: str, caption: str, type: i32) -> i32
+
+# Call Windows API
+MessageBoxA(0, "Hello from Dolet!", "Dolet FFI Test", 0)
+print("FFI test passed!")

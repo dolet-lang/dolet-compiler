@@ -1,0 +1,42 @@
+##############################
+# Test 07: Structs
+# Tests struct declarations, fields, instantiation, methods
+##############################
+
+# Basic struct
+struct Point:
+    x: i32
+    y: i32
+
+p: Point = Point(x=10, y=20)
+print(p.x)
+print(p.y)
+
+# Struct with default values
+struct Player:
+    name: str
+    score: i32 = 0
+    health: i32 = 100
+
+pl: Player = Player(name="Ali")
+print(pl.name)
+print(pl.score)
+print(pl.health)
+
+# Impl block with methods
+impl Player:
+    fun add_score(amount: i32):
+        self.score += amount
+
+    fun get_info() -> str:
+        return @"Player: {self.name}, Score: {self.score}"
+
+pl.add_score(50)
+print(pl.get_info())
+
+# Static methods (simplified — no static field mutation)
+struct Config:
+    name: str
+
+c: Config = Config(name="default")
+print(c.name)

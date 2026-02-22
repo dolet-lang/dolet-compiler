@@ -23,6 +23,10 @@ mybool: bool = true
 mystr: str = "hello"
 mychar: char = 'A'
 
+#myptr: ptr = 0
+#myptrOfi64: ptr[i64] = 0
+#print(myptr)
+
 print(myi8)
 print(myi16)
 print(myi32)
@@ -42,3 +46,24 @@ print(mybool)
 
 print(mystr)
 print(mychar)
+
+"""
+hex: i64 = 0x1234567890
+print(hex)
+
+myhex: hex<i32> = 0x12345678
+print(myhex)
+
+myOctal: oct<i64> = 0o1234567890
+print(myOctal)
+
+myBin: bin<i64> = 0b11010101010101010101010101010101
+print(myBin)
+
+# nice looks:
+mypoiner: ptr<i64> = 0
+print(mypoiner)
+
+addressof: ptr<i64> = addressof(myi64)
+print(addressof)
+"""

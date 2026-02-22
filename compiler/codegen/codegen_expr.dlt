@@ -223,11 +223,31 @@ fun gen_var_load(name: str, expected: str) -> str:
     if is_param_var(name) == 1:
         return Str.concat("%", mn)
 
-    # Global variables: load from global address
+    # Check if a local variable shadows a global with the same name
+    # When inside a function, local vars should take precedence over globals
     if is_global_var(name) == 1:
-        ga: str = emit_addr_of(mn)
-        tmp: str = emit_load(ga, mt)
-        return tmp
+        # Check if the most recent registration of this variable is NOT a param
+        # and was registered after function entry (i.e. it's a local shadow)
+        is_local: i32 = 0
+        if g_in_function == 1:
+            # The most recent match in var_names is what get_mlir_name found
+            # Check if it was added as NOT a param (is_param == 0 means local alloca)
+            # Scan backwards to find the most recent var with this name
+            vi: i32 = g_var_count - 1
+            while vi >= 0:
+                voff: i64 = (vi as i64) * 8
+                vn: str = Memory.read_i64(g_var_names + voff) as str
+                if str_eq(vn, name) == 1:
+                    vpoff: i64 = (vi as i64) * 4
+                    vp: i32 = Memory.read_i32(g_var_is_param + vpoff)
+                    if vp == 0:
+                        is_local = 1
+                    vi = -1
+                vi = vi - 1
+        if is_local == 0:
+            ga: str = emit_addr_of(mn)
+            tmp: str = emit_load(ga, mt)
+            return tmp
 
     # Local variables: load from alloca
     tmp2: str = emit_load(Str.concat("%", mn), mt)
@@ -738,7 +758,7 @@ fun gen_struct_instantiation(node: i64) -> str:
 
     ssize: i32 = calculate_struct_size(sname)
     sz: str = emit_const_i64(ssize as i64)
-    mem_p: str = emit_call("malloc", sz, "i64", "!llvm.ptr")
+    mem_p: str = emit_call("Memory_malloc", sz, "i64", "!llvm.ptr")
 
     # Initialize fields from field_val nodes
     if field_vals != 0:
@@ -752,12 +772,16 @@ fun gen_struct_instantiation(node: i64) -> str:
             if fidx >= 0:
                 ftype: str = get_field_type(sname, fname)
                 fval: str = gen_expr(fval_node, ftype)
+                # Implicit cast if expression type differs from field type
+                actual_type: str = infer_expr_type(fval_node)
+                if str_eq(actual_type, ftype) == 0 and str_eq(actual_type, "unknown") == 0:
+                    fval = implicit_cast(fval, actual_type, ftype)
                 mt: str = mlir_type(ftype)
                 # GEP to field offset
                 fi_val: str = emit_const_i32(fidx)
                 struct_mlir: str = get_struct_mlir_type(sname)
                 fp: str = new_tmp()
-                emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(fp, " = llvm.getelementptr "), struct_mlir), Str.concat(Str.concat(", ", mem_p), Str.concat("[0, ", Str.concat(Convert.i64_to_str(fidx as i64), "]")))), Str.concat(" : (!llvm.ptr) -> !llvm.ptr", "")))
+                emit_ind(Str.concat(Str.concat(Str.concat(fp, " = llvm.getelementptr "), mem_p), Str.concat(Str.concat("[0, ", Str.concat(Convert.i64_to_str(fidx as i64), "]")), Str.concat(" : (!llvm.ptr) -> !llvm.ptr, ", struct_mlir))))
                 emit_store(fval, fp, mt)
             i = i + 1
 
@@ -777,15 +801,25 @@ fun gen_builtin_call(node: i64) -> str:
         ac = nl_count(args)
 
     if ac == 1:
-        a1: str = gen_expr(nl_get(args, 0), "f64")
+        # Infer the argument type instead of hardcoding f64
+        arg_et: str = infer_expr_type(nl_get(args, 0))
+        if is_float_type(arg_et) == 0:
+            arg_et = "f64"
+        arg_mt: str = mlir_type(arg_et)
+        a1: str = gen_expr(nl_get(args, 0), arg_et)
         result: str = new_tmp()
-        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(result, " = llvm.call @"), intrinsic), Str.concat("(", Str.concat(a1, ")"))), " : (f64) -> f64"))
+        # Use direct intrinsic syntax: llvm.intr.sqrt(%val) : (f32) -> f32
+        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(result, " = "), intrinsic), Str.concat("(", Str.concat(a1, ")"))), Str.concat(Str.concat(" : (", arg_mt), Str.concat(") -> ", arg_mt))))
         return result
     elif ac == 2:
-        a1: str = gen_expr(nl_get(args, 0), "f64")
-        a2: str = gen_expr(nl_get(args, 1), "f64")
+        arg_et2: str = infer_expr_type(nl_get(args, 0))
+        if is_float_type(arg_et2) == 0:
+            arg_et2 = "f64"
+        arg_mt2: str = mlir_type(arg_et2)
+        a1: str = gen_expr(nl_get(args, 0), arg_et2)
+        a2: str = gen_expr(nl_get(args, 1), arg_et2)
         result: str = new_tmp()
-        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(result, " = llvm.call @"), intrinsic), Str.concat("(", Str.concat(Str.concat(a1, ", "), Str.concat(a2, ")")))), " : (f64, f64) -> f64"))
+        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(result, " = "), intrinsic), Str.concat("(", Str.concat(Str.concat(a1, ", "), Str.concat(a2, ")")))), Str.concat(Str.concat(" : (", Str.concat(arg_mt2, Str.concat(", ", arg_mt2))), Str.concat(") -> ", arg_mt2))))
         return result
 
     return emit_zero_ptr()
