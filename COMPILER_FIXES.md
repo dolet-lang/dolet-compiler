@@ -30,6 +30,6 @@
 - [x] #10 Collections — DONE (added angle-bracket <> generic syntax in parser_expr.dlt)
 - [x] #11 Variadic — DONE (consume TK_ELLIPSIS after param name in parser_decl.dlt)
 - [x] #12 Fun ptr types — DONE (parse fun(T,...) -> R syntax in parse_type_name in parser_expr.dlt)
-- [ ] #13 Imports — PENDING (module imports codegen not yet implemented)
+- [x] #13 Imports — DONE (text-level import resolution in driver: stdlib/std, current dir, dot-to-path)
 - [x] #14 @stack — DONE (skip @annotation in parser_main.dlt)
 - [x] #15 dltc.bat — DONE (added exit /b 0 at end)

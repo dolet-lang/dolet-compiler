@@ -1,0 +1,12 @@
+##############################
+# Test 16: Module Imports
+# Tests importing local modules
+##############################
+
+import test_import_helper
+
+result: i32 = helper_add(10, 20)
+print(@"10 + 20 = {result}")
+
+msg: str = helper_greet("Dolet")
+print(msg)
