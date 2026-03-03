@@ -4,16 +4,19 @@ build/*.exe
 build/*.mlir
 build/*.ll
 build/*.obj
-#bin/doletc.exe
 
 # Intermediate compiler output
 *.mlir
 *.ll
 *.obj
 *.exe
-dltc.bat
 !bin/doletc.exe
-tools/*.exe
+
+# Dev junctions (created by dev_setup.bat, NOT part of this repo)
+/tools/
+/stdlib/
+/lib/
+/packages/
 
 # Python
 __pycache__/
@@ -27,13 +30,9 @@ __pycache__/
 *.swp
 *.swo
 
-# Embedded git repos in packages
-packages/**/.git/
-
 # OS
 Thumbs.db
 .DS_Store
-
 
 #others
 COMPILER_FIXES.md
