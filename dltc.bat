@@ -11,7 +11,7 @@ REM Go up one level from dolet-Lang/ to workspace root
 for %%i in ("%SCRIPT_DIR%..") do set "WORKSPACE_ROOT=%%~fi\"
 set "TOOLS_DIR=%WORKSPACE_ROOT%tools"
 set "COMPILER=%SCRIPT_DIR%bin\doletc.exe"
-set "SYS_LIBS=%WORKSPACE_ROOT%stdlib\sys\windows"
+set "SYS_LIBS=%WORKSPACE_ROOT%library\std\sys\windows"
 
 if "%~1"=="" (
     echo Dolet Compiler v0.3

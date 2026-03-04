@@ -15,7 +15,6 @@
 
 [![Written in Dolet](https://img.shields.io/badge/written%20in-Dolet-blue)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)]()
-[![License](https://img.shields.io/badge/license-MIT-green)]()
 
 </div>
 
@@ -58,13 +57,6 @@ doletc <input.dlt> [-o output.exe] [--keep-mlir] [--keep-llvm] [--no-runtime]
 | `--keep-mlir` | Keep intermediate `.mlir` file |
 | `--keep-llvm` | Keep intermediate `.ll` file |
 | `--no-runtime` | Don't auto-import runtime libraries |
-
-**Example:**
-
-```batch
-doletc my_app.dlt -o my_app.exe
-my_app.exe
-```
 
 ## Language Features
 
@@ -134,13 +126,12 @@ dolet-compiler/
 ├── bin/doletc.exe         # Compiled compiler
 ├── build/                 # Build artifacts
 ├── tests/                 # Test files
-├── dltc.bat               # Batch driver script
-└── README.md
+└── dltc.bat               # Batch driver script
 ```
 
 ## Building from Source
 
-The compiler is self-hosting, so you need the **bootstrap compiler** (written in Python) for the first build.
+The compiler is self-hosting, so you need the [bootstrap compiler](https://github.com/dolet-lang/dolet-bootstrap) (written in Python) for the first build.
 
 ### Prerequisites
 
@@ -156,9 +147,10 @@ Clone all required repos into a workspace directory:
 mkdir dolet-workspace
 cd dolet-workspace
 
-git clone https://github.com/dolet-lang/dolet-compiler.git dolet-Lang
+:: Required
+git clone https://github.com/dolet-lang/dolet-compiler.git dolet-compiler
 git clone https://github.com/dolet-lang/dolet-bootstrap.git bootstrap
-git clone https://github.com/dolet-lang/stdlib.git stdlib
+git clone https://github.com/dolet-lang/dolet-library.git library
 ```
 
 ### 2. Add LLVM Tools
@@ -171,9 +163,9 @@ dolet-workspace/
 │   ├── clang.exe
 │   ├── lld-link.exe
 │   └── mlir-translate.exe
-├── dolet-Lang/
+├── dolet-compiler/
 ├── bootstrap/
-└── stdlib/
+└── library/
 ```
 
 ### 3. Build the Compiler
@@ -183,49 +175,40 @@ cd bootstrap
 python build.py compile
 ```
 
-This will produce `dolet-Lang/bin/doletc.exe`.
+This produces `dolet-compiler/bin/doletc.exe`.
 
-### 4. Set Up Dev Environment
-
-Run from the workspace root:
+### 4. Verify
 
 ```batch
-dev_setup.bat
+dolet-compiler\bin\doletc.exe dolet-compiler\tests\test_print.dlt
+dolet-compiler\tests\test_print.exe
 ```
 
-This creates directory junctions so `doletc.exe` can find `tools/`, `stdlib/`, etc. Only needed once.
-
-### 5. Verify
-
-```batch
-dolet-Lang\bin\doletc.exe dolet-Lang\tests\test_print.dlt
-dolet-Lang\tests\test_print.exe
-```
-
-### Workspace Layout
+### Required Workspace Layout
 
 ```
 dolet-workspace/
-├── dolet-Lang/        # This repo — compiler source
+├── dolet-compiler/    # This repo — compiler source
 ├── bootstrap/         # Python bootstrap compiler
-├── stdlib/            # Standard library & runtime
-├── tools/             # LLVM toolchain
-├── lib/               # Importable libraries (optional)
-├── packages/          # External packages (optional)
-├── dev_setup.bat      # Creates dev junctions (run once)
-└── build_release.bat  # Assembles release distribution
+├── library/           # Standard library, runtime & importable libs
+│   ├── std/           # Standard library (runtime, std, sys, core)
+│   ├── importable/    # Importable libraries (math, net, random)
+│   └── system-abi-manager/
+├── tools/             # LLVM toolchain (clang, lld-link, mlir-translate)
+└── packages/          # External packages (optional)
 ```
+
+> **Note:** The repos must be cloned with these exact directory names and placed side by side for the compiler to find them.
 
 ## Self-Hosting Flow
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  First Build (Bootstrap)                                 │
-│  Python bootstrap ──compiles──→ doletc.exe              │
+│  Python bootstrap ──compiles──> doletc.exe               │
 │                                                          │
-│  Self-Hosting                                            │
-│  doletc.exe ──compiles──→ doletc.exe  (Dolet builds     │
-│                                        itself)           │
+│  Self-Hosting (future)                                   │
+│  doletc.exe ──compiles──> doletc.exe                     │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -235,7 +218,7 @@ dolet-workspace/
 |------------|-------------|
 | [dolet-compiler](https://github.com/dolet-lang/dolet-compiler) | The Dolet compiler (this repo) |
 | [dolet-bootstrap](https://github.com/dolet-lang/dolet-bootstrap) | Python bootstrap compiler |
-| [stdlib](https://github.com/dolet-lang/stdlib) | Standard library & runtime |
+| [dolet-library](https://github.com/dolet-lang/dolet-library) | Standard library, runtime & importable libs |
 
 ## License
 

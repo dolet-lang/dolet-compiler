@@ -12,10 +12,9 @@ build/*.obj
 *.exe
 !bin/doletc.exe
 
-# Dev junctions (created by dev_setup.bat, NOT part of this repo)
+# Dev junctions (NOT part of this repo)
 /tools/
-/stdlib/
-/lib/
+/library/
 /packages/
 
 # Python
