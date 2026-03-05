@@ -23,16 +23,38 @@ set "DIST=%SCRIPT_DIR%dist\dolet-v%VER%-windows-x64"
 echo [Dolet Release Builder v%VER%]
 echo.
 
-REM --- Verify doletc.exe ---
+REM --- Verify doletc.exe (auto-compile if missing) ---
 if not exist "%SCRIPT_DIR%bin\doletc.exe" (
-    echo [ERROR] bin\doletc.exe not found!
+    echo [INFO] bin\doletc.exe not found - compiling via bootstrap...
     echo.
-    echo   To compile doletc.exe, clone the bootstrap compiler and run:
-    echo     git clone https://github.com/dolet-lang/dolet-bootstrap.git bootstrap
-    echo     cd bootstrap
-    echo     python build.py compile
+    if not exist "%SCRIPT_DIR%bootstrap\build.py" (
+        echo [ERROR] Bootstrap compiler not found!
+        echo.
+        echo   Clone the bootstrap compiler first:
+        echo     git clone https://github.com/dolet-lang/dolet-bootstrap.git bootstrap
+        echo.
+        exit /b 1
+    )
+    if not exist "%SCRIPT_DIR%library\std" (
+        echo [ERROR] library/ not found!
+        echo.
+        echo   Clone the library first:
+        echo     git clone https://github.com/dolet-lang/library.git library
+        echo.
+        exit /b 1
+    )
+    mkdir "%SCRIPT_DIR%bin" 2>nul
+    python "%SCRIPT_DIR%bootstrap\build.py" compile
+    if errorlevel 1 (
+        echo [ERROR] Bootstrap compilation failed!
+        exit /b 1
+    )
+    if not exist "%SCRIPT_DIR%bin\doletc.exe" (
+        echo [ERROR] Compilation succeeded but bin\doletc.exe not found!
+        exit /b 1
+    )
+    echo [OK] doletc.exe compiled successfully
     echo.
-    exit /b 1
 )
 
 REM --- Verify tools/ ---
