@@ -12,7 +12,8 @@ build/*.obj
 *.exe
 !bin/doletc.exe
 
-# Dev junctions (NOT part of this repo)
+# Cloned repos (users add these manually, NOT part of this repo)
+/bootstrap/
 /tools/
 /library/
 /packages/
