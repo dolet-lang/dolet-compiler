@@ -150,7 +150,7 @@ cd dolet-workspace
 :: Required
 git clone https://github.com/dolet-lang/dolet-compiler.git dolet-compiler
 git clone https://github.com/dolet-lang/dolet-bootstrap.git bootstrap
-git clone https://github.com/dolet-lang/dolet-library.git library
+git clone https://github.com/dolet-lang/library.git library
 ```
 
 ### 2. Add LLVM Tools
@@ -218,7 +218,7 @@ dolet-workspace/
 |------------|-------------|
 | [dolet-compiler](https://github.com/dolet-lang/dolet-compiler) | The Dolet compiler (this repo) |
 | [dolet-bootstrap](https://github.com/dolet-lang/dolet-bootstrap) | Python bootstrap compiler |
-| [dolet-library](https://github.com/dolet-lang/dolet-library) | Standard library, runtime & importable libs |
+| [dolet-library](https://github.com/dolet-lang/library) | Standard library, runtime & importable libs |
 
 ## License
 
