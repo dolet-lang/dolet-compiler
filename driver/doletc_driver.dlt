@@ -179,8 +179,8 @@ fun get_exe_dir() -> str:
     return buf as str
 
 fun load_runtime(exe_dir: str) -> str:
-    # Runtime is at: <exe_dir>/../stdlib/runtime/  (bin/doletc.exe → stdlib/runtime/)
-    rt_base: str = Str.concat(exe_dir, "\\..\\stdlib\\runtime\\")
+    # Runtime is at: <exe_dir>/../library/std/runtime/  (bin/doletc.exe → library/std/runtime/)
+    rt_base: str = Str.concat(exe_dir, "\\..\\library\\std\\runtime\\")
 
     runtime_src: str = ""
     # Read runtime files in dependency order
@@ -207,7 +207,7 @@ fun load_runtime(exe_dir: str) -> str:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r6))
 
     # Auto-import std/io.dlt (print overloads) — overload support via name mangling
-    std_base: str = Str.concat(exe_dir, "\\..\\stdlib\\std\\")
+    std_base: str = Str.concat(exe_dir, "\\..\\library\\std\\std\\")
     r7: str = read_file_to_string(Str.concat(std_base, "io.dlt"))
     if Memory.strlen(r7) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r7))
@@ -497,7 +497,7 @@ fun main() -> i32:
             IOOps.io_println(Str.concat("Runtime: ", Str.concat(Convert.i64_to_str(rt_len), " chars")))
 
     # Resolve and load user imports
-    std_base: str = Str.concat(exe_dir, "\\..\\stdlib\\std\\")
+    std_base: str = Str.concat(exe_dir, "\\..\\library\\std\\std\\")
     src_dir: str = get_file_dir(input_path)
     imp_src: str = resolve_and_load_imports(user_src, std_base, src_dir)
     imp_len: i64 = Memory.strlen(imp_src)
@@ -534,7 +534,7 @@ fun main() -> i32:
     # Phase 4: Full pipeline (MLIR → LLVM IR → Object → Executable)
     IOOps.io_println("[4/4] Building executable...")
     tools_dir: str = Str.concat(exe_dir, "\\..\\tools\\")
-    sys_libs: str = Str.concat(exe_dir, "\\..\\stdlib\\sys\\windows")
+    sys_libs: str = Str.concat(exe_dir, "\\..\\library\\std\\sys\\windows")
 
     # Step 1: mlir-translate (MLIR → LLVM IR)
     cmd1: str = Str.concat(Str.concat(Str.concat(Str.concat("\"", tools_dir), "mlir-translate.exe\" --mlir-to-llvmir \""), mlir_path), Str.concat("\" -o \"", Str.concat(ll_path, "\"")))
