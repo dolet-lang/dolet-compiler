@@ -1,0 +1,12 @@
+# Minimal: i128 then u8
+print("i128:")
+li128: list<i128> = [1000, 2000, 3000]
+for a in li128:
+    print(a)
+
+print("u8:")
+lu8: list<u8> = [5, 10, 15]
+for b in lu8:
+    print(b)
+
+print("DONE")

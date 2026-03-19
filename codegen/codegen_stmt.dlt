@@ -378,11 +378,16 @@ fun gen_foreach_loop(node: i64):
     # Body
     emit(Str.concat("  ", Str.concat(body_label, ":")))
 
-    # Load current element (offset = 16 + idx * 8)
+    # Calculate element slot size (must match list literal allocation)
+    elem_slot_sz: i64 = get_type_size(elem_type) as i64
+    if elem_slot_sz < 8:
+        elem_slot_sz = 8
+
+    # Load current element (offset = 16 + idx * elem_slot)
     cur_idx2: str = emit_load(idx_alloc, "i32")
     idx_i64: str = new_tmp()
     emit_ind(Str.concat(Str.concat(Str.concat(idx_i64, " = llvm.sext "), cur_idx2), " : i32 to i64"))
-    c8: str = emit_const_i64(8)
+    c8: str = emit_const_i64(elem_slot_sz)
     off: str = new_tmp()
     emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(off, " = llvm.mul "), idx_i64), Str.concat(", ", c8)), " : i64"))
     c16: str = emit_const_i64(16)

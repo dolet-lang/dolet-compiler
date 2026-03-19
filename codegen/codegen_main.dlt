@@ -296,6 +296,10 @@ fun collect_strings(node: i64):
         collect_strings(Memory.read_i64(node + 24))
         collect_strings_list(Memory.read_i64(node + 32))
         return
+    if nt == NODE_FOR_EACH:
+        collect_strings(Memory.read_i64(node + 32))
+        collect_strings_list(Memory.read_i64(node + 40))
+        return
     if nt == NODE_BLOCK:
         collect_strings_list(Memory.read_i64(node + 8))
         return

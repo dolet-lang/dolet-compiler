@@ -702,8 +702,13 @@ fun gen_list_literal(node: i64, expected: str) -> str:
     if exp_found == 0 and ec > 0:
         elem_type = infer_expr_type(nl_get(elems, 0))
 
-    # Allocate: header(16 bytes: size + capacity) + data (8 bytes per element)
-    total: i64 = 16 + ((ec as i64) * 8)
+    # Calculate element slot size (min 8 for alignment)
+    elem_slot: i64 = get_type_size(elem_type) as i64
+    if elem_slot < 8:
+        elem_slot = 8
+
+    # Allocate: header(16 bytes: size + capacity) + data
+    total: i64 = 16 + ((ec as i64) * elem_slot)
 
     sz: str = emit_const_i64(total)
     mem_p: str = emit_call("Memory_malloc", sz, "i64", "!llvm.ptr")
@@ -728,7 +733,7 @@ fun gen_list_literal(node: i64, expected: str) -> str:
         inf_type: str = infer_expr_type(e_node)
         if str_eq(inf_type, elem_type) == 0 and str_eq(inf_type, "unknown") == 0:
             eval = implicit_cast(eval, inf_type, elem_type)
-        offset: i64 = 16 + ((i as i64) * 8)
+        offset: i64 = 16 + ((i as i64) * elem_slot)
         off_s: str = emit_const_i64(offset)
         ep: str = new_tmp()
         emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(ep, " = llvm.getelementptr "), mem_p), Str.concat("[", Str.concat(off_s, "]"))), " : (!llvm.ptr, i64) -> !llvm.ptr, i8"))
