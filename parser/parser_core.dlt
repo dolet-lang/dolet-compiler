@@ -359,12 +359,6 @@ fun is_literal_token(k: i32) -> i32:
     return 0
 
 fun token_to_type_str(k: i32) -> str:
-    if k == TK_LIST:
-        return "list"
-    if k == TK_MAP:
-        return "map"
-    if k == TK_ARRAY:
-        return "array"
     if k == TK_BOOL:
         return "bool"
     if k == TK_TYPE:

@@ -448,12 +448,6 @@ fun resolve_keyword(name: str) -> i32:
         return TK_OR
     if str_eq(name, "not") == 1:
         return TK_NOT
-    if str_eq(name, "list") == 1:
-        return TK_LIST
-    if str_eq(name, "map") == 1:
-        return TK_MAP
-    if str_eq(name, "array") == 1:
-        return TK_ARRAY
     if str_eq(name, "stack") == 1:
         return TK_STACK
     if str_eq(name, "int") == 1:
