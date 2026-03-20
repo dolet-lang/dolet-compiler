@@ -5117,8 +5117,33 @@ g_continue_label: str = ""
 
 # ==========================================
 # MLIR Type Mapping
-# ==========================================
 fun mlir_type(dolet_type: str) -> str:
+    # Direct struct type checks (for transparent types like I32, I64)
+    if str_eq(dolet_type, "I8") == 1:
+        return "i8"
+    if str_eq(dolet_type, "I16") == 1:
+        return "i16"
+    if str_eq(dolet_type, "I32") == 1:
+        return "i32"
+    if str_eq(dolet_type, "I64") == 1:
+        return "i64"
+    if str_eq(dolet_type, "I128") == 1:
+        return "i128"
+    if str_eq(dolet_type, "U8") == 1:
+        return "i8"
+    if str_eq(dolet_type, "U16") == 1:
+        return "i16"
+    if str_eq(dolet_type, "U32") == 1:
+        return "i32"
+    if str_eq(dolet_type, "U64") == 1:
+        return "i64"
+    if str_eq(dolet_type, "U128") == 1:
+        return "i128"
+    if str_eq(dolet_type, "F32") == 1:
+        return "f32"
+    if str_eq(dolet_type, "F64") == 1:
+        return "f64"
+
     # Compiler intrinsic types (__i32 → LLVM i32, etc.)
     if str_eq(dolet_type, "__i8") == 1:
         return "i8"
@@ -7822,7 +7847,39 @@ fun gen_method_def(struct_name: str, node: i64):
 
     param_str: str = ""
     if is_static == 0:
-        if self_is_value == 1:
+        if str_eq(struct_name, "Bool") == 1:
+            param_str = "%self: i1"
+        elif str_eq(struct_name, "bool") == 1:
+            param_str = "%self: i1"
+        elif str_eq(struct_name, "I32") == 1:
+            param_str = "%self: i32"
+        elif str_eq(struct_name, "i32") == 1:
+            param_str = "%self: i32"
+        elif str_eq(struct_name, "I64") == 1:
+            param_str = "%self: i64"
+        elif str_eq(struct_name, "i64") == 1:
+            param_str = "%self: i64"
+        elif str_eq(struct_name, "Char") == 1:
+            param_str = "%self: i8"
+        elif str_eq(struct_name, "char") == 1:
+            param_str = "%self: i8"
+        elif str_eq(struct_name, "I8") == 1:
+            param_str = "%self: i8"
+        elif str_eq(struct_name, "i8") == 1:
+            param_str = "%self: i8"
+        elif str_eq(struct_name, "I16") == 1:
+            param_str = "%self: i16"
+        elif str_eq(struct_name, "i16") == 1:
+            param_str = "%self: i16"
+        elif str_eq(struct_name, "F32") == 1:
+            param_str = "%self: f32"
+        elif str_eq(struct_name, "f32") == 1:
+            param_str = "%self: f32"
+        elif str_eq(struct_name, "F64") == 1:
+            param_str = "%self: f64"
+        elif str_eq(struct_name, "f64") == 1:
+            param_str = "%self: f64"
+        elif self_is_value == 1:
             param_str = Str.concat("%self: ", mlir_type(resolved_st))
         else:
             param_str = "%self: !llvm.ptr"
@@ -9230,12 +9287,6 @@ fun load_runtime(exe_dir: str) -> str:
 
     runtime_src: str = ""
 
-    # Auto-import type definitions first (types are library-defined identifiers)
-    std_types_base: str = Str.concat(exe_dir, "\\..\\library\\std\\std\\")
-    r_types: str = read_file_to_string(Str.concat(std_types_base, "types.dlt"))
-    if Memory.strlen(r_types) > 0:
-        runtime_src = Str.concat(runtime_src, Str.concat("\n", r_types))
-
     # Read runtime files in dependency order
     r1: str = read_file_to_string(Str.concat(rt_base, "kernel32_bindings.dlt"))
     if Memory.strlen(r1) > 0:
@@ -9259,13 +9310,13 @@ fun load_runtime(exe_dir: str) -> str:
     if Memory.strlen(r6) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r6))
 
-    # Auto-import std/io.dlt (print overloads) — overload support via name mangling
+    # Auto-import std library (io + type definitions with methods)
     std_base: str = Str.concat(exe_dir, "\\..\\library\\std\\std\\")
     r7: str = read_file_to_string(Str.concat(std_base, "io.dlt"))
     if Memory.strlen(r7) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r7))
 
-    # Auto-import transparent type definitions with methods
+    # Auto-import type definitions: structs + aliases + methods
     types_base: str = Str.concat(std_base, "types\\")
     rt_int: str = read_file_to_string(Str.concat(types_base, "integers.dlt"))
     if Memory.strlen(rt_int) > 0:
@@ -9276,11 +9327,9 @@ fun load_runtime(exe_dir: str) -> str:
     rt_prm: str = read_file_to_string(Str.concat(types_base, "primitives.dlt"))
     if Memory.strlen(rt_prm) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", rt_prm))
-
-    # Auto-import collections/list.dlt (list extend methods: size, append, etc.)
-    r8: str = read_file_to_string(Str.concat(std_base, "collections\\list.dlt"))
-    if Memory.strlen(r8) > 0:
-        runtime_src = Str.concat(runtime_src, Str.concat("\n", r8))
+    rt_col: str = read_file_to_string(Str.concat(types_base, "collections.dlt"))
+    if Memory.strlen(rt_col) > 0:
+        runtime_src = Str.concat(runtime_src, Str.concat("\n", rt_col))
 
     return runtime_src
 

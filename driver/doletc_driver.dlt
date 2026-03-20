@@ -66,12 +66,6 @@ fun load_runtime(exe_dir: str) -> str:
 
     runtime_src: str = ""
 
-    # Auto-import type definitions first (types are library-defined identifiers)
-    std_types_base: str = Str.concat(exe_dir, "\\..\\library\\std\\std\\")
-    r_types: str = read_file_to_string(Str.concat(std_types_base, "types.dlt"))
-    if Memory.strlen(r_types) > 0:
-        runtime_src = Str.concat(runtime_src, Str.concat("\n", r_types))
-
     # Read runtime files in dependency order
     r1: str = read_file_to_string(Str.concat(rt_base, "kernel32_bindings.dlt"))
     if Memory.strlen(r1) > 0:
@@ -95,13 +89,13 @@ fun load_runtime(exe_dir: str) -> str:
     if Memory.strlen(r6) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r6))
 
-    # Auto-import std/io.dlt (print overloads) — overload support via name mangling
+    # Auto-import std library (io + type definitions with methods)
     std_base: str = Str.concat(exe_dir, "\\..\\library\\std\\std\\")
     r7: str = read_file_to_string(Str.concat(std_base, "io.dlt"))
     if Memory.strlen(r7) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r7))
 
-    # Auto-import transparent type definitions with methods
+    # Auto-import type definitions: structs + aliases + methods
     types_base: str = Str.concat(std_base, "types\\")
     rt_int: str = read_file_to_string(Str.concat(types_base, "integers.dlt"))
     if Memory.strlen(rt_int) > 0:
@@ -112,11 +106,9 @@ fun load_runtime(exe_dir: str) -> str:
     rt_prm: str = read_file_to_string(Str.concat(types_base, "primitives.dlt"))
     if Memory.strlen(rt_prm) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", rt_prm))
-
-    # Auto-import collections/list.dlt (list extend methods: size, append, etc.)
-    r8: str = read_file_to_string(Str.concat(std_base, "collections\\list.dlt"))
-    if Memory.strlen(r8) > 0:
-        runtime_src = Str.concat(runtime_src, Str.concat("\n", r8))
+    rt_col: str = read_file_to_string(Str.concat(types_base, "collections.dlt"))
+    if Memory.strlen(rt_col) > 0:
+        runtime_src = Str.concat(runtime_src, Str.concat("\n", rt_col))
 
     return runtime_src
 

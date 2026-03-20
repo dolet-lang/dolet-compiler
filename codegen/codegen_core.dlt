@@ -700,8 +700,33 @@ g_continue_label: str = ""
 
 # ==========================================
 # MLIR Type Mapping
-# ==========================================
 fun mlir_type(dolet_type: str) -> str:
+    # Direct struct type checks (for transparent types like I32, I64)
+    if str_eq(dolet_type, "I8") == 1:
+        return "i8"
+    if str_eq(dolet_type, "I16") == 1:
+        return "i16"
+    if str_eq(dolet_type, "I32") == 1:
+        return "i32"
+    if str_eq(dolet_type, "I64") == 1:
+        return "i64"
+    if str_eq(dolet_type, "I128") == 1:
+        return "i128"
+    if str_eq(dolet_type, "U8") == 1:
+        return "i8"
+    if str_eq(dolet_type, "U16") == 1:
+        return "i16"
+    if str_eq(dolet_type, "U32") == 1:
+        return "i32"
+    if str_eq(dolet_type, "U64") == 1:
+        return "i64"
+    if str_eq(dolet_type, "U128") == 1:
+        return "i128"
+    if str_eq(dolet_type, "F32") == 1:
+        return "f32"
+    if str_eq(dolet_type, "F64") == 1:
+        return "f64"
+
     # Compiler intrinsic types (__i32 → LLVM i32, etc.)
     if str_eq(dolet_type, "__i8") == 1:
         return "i8"

@@ -164,7 +164,39 @@ fun gen_method_def(struct_name: str, node: i64):
 
     param_str: str = ""
     if is_static == 0:
-        if self_is_value == 1:
+        if str_eq(struct_name, "Bool") == 1:
+            param_str = "%self: i1"
+        elif str_eq(struct_name, "bool") == 1:
+            param_str = "%self: i1"
+        elif str_eq(struct_name, "I32") == 1:
+            param_str = "%self: i32"
+        elif str_eq(struct_name, "i32") == 1:
+            param_str = "%self: i32"
+        elif str_eq(struct_name, "I64") == 1:
+            param_str = "%self: i64"
+        elif str_eq(struct_name, "i64") == 1:
+            param_str = "%self: i64"
+        elif str_eq(struct_name, "Char") == 1:
+            param_str = "%self: i8"
+        elif str_eq(struct_name, "char") == 1:
+            param_str = "%self: i8"
+        elif str_eq(struct_name, "I8") == 1:
+            param_str = "%self: i8"
+        elif str_eq(struct_name, "i8") == 1:
+            param_str = "%self: i8"
+        elif str_eq(struct_name, "I16") == 1:
+            param_str = "%self: i16"
+        elif str_eq(struct_name, "i16") == 1:
+            param_str = "%self: i16"
+        elif str_eq(struct_name, "F32") == 1:
+            param_str = "%self: f32"
+        elif str_eq(struct_name, "f32") == 1:
+            param_str = "%self: f32"
+        elif str_eq(struct_name, "F64") == 1:
+            param_str = "%self: f64"
+        elif str_eq(struct_name, "f64") == 1:
+            param_str = "%self: f64"
+        elif self_is_value == 1:
             param_str = Str.concat("%self: ", mlir_type(resolved_st))
         else:
             param_str = "%self: !llvm.ptr"
