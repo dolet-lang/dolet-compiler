@@ -141,9 +141,33 @@ fun gen_method_def(struct_name: str, node: i64):
     g_tmp_counter = 0
 
     # Build param list
+    # Check if this is a value type (primitive / transparent wrapper)
+    resolved_st: str = resolve_type_full(struct_name)
+    self_is_value: i32 = 0
+    if is_int_type(resolved_st) == 1:
+        self_is_value = 1
+    elif is_float_type(resolved_st) == 1:
+        self_is_value = 1
+    elif str_eq(resolved_st, "bool") == 1:
+        self_is_value = 1
+    elif str_eq(resolved_st, "char") == 1:
+        self_is_value = 1
+    # Also check intrinsic types directly
+    elif is_int_type(struct_name) == 1:
+        self_is_value = 1
+    elif is_float_type(struct_name) == 1:
+        self_is_value = 1
+    elif str_eq(struct_name, "bool") == 1:
+        self_is_value = 1
+    elif str_eq(struct_name, "char") == 1:
+        self_is_value = 1
+
     param_str: str = ""
     if is_static == 0:
-        param_str = "%self: !llvm.ptr"
+        if self_is_value == 1:
+            param_str = Str.concat("%self: ", mlir_type(resolved_st))
+        else:
+            param_str = "%self: !llvm.ptr"
     pc: i32 = 0
     if params != 0:
         pc = nl_count(params)

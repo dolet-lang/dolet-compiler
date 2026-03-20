@@ -1,0 +1,27 @@
+# Test transparent struct methods on primitive types
+
+x: i32 = -42
+print(x.abs())
+
+y: i32 = 10
+z: i32 = 20
+print(y.max(z))
+print(z.min(y))
+
+c: i32 = 50
+print(c.clamp(0, 30))
+
+n: i32 = 4
+if n.is_even():
+    print("4 is even")
+
+a: i64 = -100
+print(a.abs())
+
+f: f64 = -3.14
+print(f.abs())
+
+if f.is_negative():
+    print("f is negative")
+
+print("ALL TRANSPARENT TESTS DONE")

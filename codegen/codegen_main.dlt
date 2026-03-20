@@ -135,40 +135,52 @@ fun collect_declarations(ast: i64):
             sname: str = Memory.read_i64(node + 8) as str
             fields: i64 = Memory.read_i64(node + 16)
             base_class: str = Memory.read_i64(node + 32) as str
-            # Merge parent fields if struct extends another
-            if str_eq(base_class, "") == 0:
-                parent_fields: i64 = get_struct_fields(base_class)
-                if parent_fields != 0:
-                    pfc: i32 = nl_count(parent_fields)
-                    # Create merged field list: parent fields first, then child fields
-                    merged: i64 = mk_node_list(64)
-                    pi: i32 = 0
-                    while pi < pfc:
-                        nl_add(merged, nl_get(parent_fields, pi))
-                        pi = pi + 1
-                    # Add child-specific fields
-                    if fields != 0:
-                        cfc: i32 = nl_count(fields)
-                        ci: i32 = 0
-                        while ci < cfc:
-                            nl_add(merged, nl_get(fields, ci))
-                            ci = ci + 1
-                    fields = merged
-            if fields != 0:
-                register_struct(sname, fields)
-            # Register inline method signatures with param types (methods at +40)
-            smethods: i64 = Memory.read_i64(node + 40)
-            if smethods != 0:
-                smc: i32 = nl_count(smethods)
-                sj: i32 = 0
-                while sj < smc:
-                    smnode: i64 = nl_get(smethods, sj)
-                    smname: str = Memory.read_i64(smnode + 8) as str
-                    smret: str = Memory.read_i64(smnode + 24) as str
-                    smangled: str = Str.concat(Str.concat(sname, "_"), smname)
-                    register_fun_sig(smangled, smret)
-                    register_impl_method(sname, smname, smnode)
-                    sj = sj + 1
+            s_stack_alloc: i64 = Memory.read_i64(node + 56)
+
+            # @transparent struct — register as transparent, not as regular struct
+            if s_stack_alloc == 2:
+                # Get first (and only) field's type as inner raw type
+                if fields != 0:
+                    if nl_count(fields) > 0:
+                        tf: i64 = nl_get(fields, 0)
+                        inner_t: str = Memory.read_i64(tf + 16) as str
+                        register_transparent(sname, inner_t)
+                i = i + 1
+            else:
+                # Merge parent fields if struct extends another
+                if str_eq(base_class, "") == 0:
+                    parent_fields: i64 = get_struct_fields(base_class)
+                    if parent_fields != 0:
+                        pfc: i32 = nl_count(parent_fields)
+                        # Create merged field list: parent fields first, then child fields
+                        merged: i64 = mk_node_list(64)
+                        pi: i32 = 0
+                        while pi < pfc:
+                            nl_add(merged, nl_get(parent_fields, pi))
+                            pi = pi + 1
+                        # Add child-specific fields
+                        if fields != 0:
+                            cfc: i32 = nl_count(fields)
+                            ci: i32 = 0
+                            while ci < cfc:
+                                nl_add(merged, nl_get(fields, ci))
+                                ci = ci + 1
+                        fields = merged
+                if fields != 0:
+                    register_struct(sname, fields)
+                # Register inline method signatures with param types (methods at +40)
+                smethods: i64 = Memory.read_i64(node + 40)
+                if smethods != 0:
+                    smc: i32 = nl_count(smethods)
+                    sj: i32 = 0
+                    while sj < smc:
+                        smnode: i64 = nl_get(smethods, sj)
+                        smname: str = Memory.read_i64(smnode + 8) as str
+                        smret: str = Memory.read_i64(smnode + 24) as str
+                        smangled: str = Str.concat(Str.concat(sname, "_"), smname)
+                        register_fun_sig(smangled, smret)
+                        register_impl_method(sname, smname, smnode)
+                        sj = sj + 1
 
         # Function definitions — register signatures (with overload support)
         if nt == NODE_FUN_DEF:
@@ -235,6 +247,12 @@ fun collect_declarations(ast: i64):
         if nt == NODE_VAR_DECL:
             vname2: str = Memory.read_i64(node + 16) as str
             register_global_var(vname2, node)
+
+        # Type alias: type i32 = I32
+        if nt == NODE_TYPE_ALIAS:
+            aname: str = Memory.read_i64(node + 8) as str
+            atarget: str = Memory.read_i64(node + 16) as str
+            register_alias(aname, atarget)
 
         i = i + 1
 
@@ -435,9 +453,12 @@ fun gen_functions(ast: i64):
             IOOps.io_println("[gen_fn] extern done")
         elif nt == NODE_STRUCT_DECL:
             sdbg: str = Memory.read_i64(node + 8) as str
-            IOOps.io_println(Str.concat("[gen_fn] struct: ", sdbg))
-            gen_struct_inline_methods(node)
-            IOOps.io_println("[gen_fn] struct methods done")
+            # Skip @transparent structs — they have no MLIR representation
+            s_sa: i64 = Memory.read_i64(node + 56)
+            if s_sa != 2:
+                IOOps.io_println(Str.concat("[gen_fn] struct: ", sdbg))
+                gen_struct_inline_methods(node)
+                IOOps.io_println("[gen_fn] struct methods done")
         elif nt == NODE_FUN_DEF:
             gen_fun_def(node)
         elif nt == NODE_IMPL_BLOCK:

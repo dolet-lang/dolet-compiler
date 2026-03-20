@@ -434,6 +434,8 @@ fun resolve_keyword(name: str) -> i32:
         return TK_PASS
     if str_eq(name, "extend") == 1:
         return TK_EXTEND
+    if str_eq(name, "type") == 1:
+        return TK_TYPE_ALIAS
     if str_eq(name, "true") == 1:
         return TK_BOOL
     if str_eq(name, "false") == 1:
@@ -454,36 +456,6 @@ fun resolve_keyword(name: str) -> i32:
         return TK_ARRAY
     if str_eq(name, "stack") == 1:
         return TK_STACK
-    if str_eq(name, "i8") == 1:
-        return TK_I8
-    if str_eq(name, "i16") == 1:
-        return TK_I16
-    if str_eq(name, "i32") == 1:
-        return TK_I32
-    if str_eq(name, "i64") == 1:
-        return TK_I64
-    if str_eq(name, "i128") == 1:
-        return TK_I128
-    if str_eq(name, "ptr") == 1:
-        return TK_PTR
-    if str_eq(name, "u8") == 1:
-        return TK_U8
-    if str_eq(name, "u16") == 1:
-        return TK_U16
-    if str_eq(name, "u32") == 1:
-        return TK_U32
-    if str_eq(name, "u64") == 1:
-        return TK_U64
-    if str_eq(name, "u128") == 1:
-        return TK_U128
-    if str_eq(name, "f32") == 1:
-        return TK_F32
-    if str_eq(name, "f64") == 1:
-        return TK_F64
-    if str_eq(name, "str") == 1:
-        return TK_STR_TYPE
-    if str_eq(name, "char") == 1:
-        return TK_CHAR_TYPE
     if str_eq(name, "int") == 1:
         return TK_TYPE
     if str_eq(name, "float") == 1:
@@ -491,8 +463,6 @@ fun resolve_keyword(name: str) -> i32:
     if str_eq(name, "double") == 1:
         return TK_TYPE
     if str_eq(name, "string") == 1:
-        return TK_TYPE
-    if str_eq(name, "bool") == 1:
         return TK_TYPE
     return TK_IDENT
 

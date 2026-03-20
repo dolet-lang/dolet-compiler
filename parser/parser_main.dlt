@@ -202,11 +202,19 @@ fun parse_statement() -> i64:
             return mk_self_field(sfname)
         return mk_self()
 
-    # Annotation: @stack, @inline, etc. — skip and parse next statement
+    # Annotation: @stack, @inline, @transparent, etc.
     if k == TK_AT:
         advance()
-        if cur_kind() == TK_IDENT or cur_kind() == TK_STACK:
+        ann_name: str = ""
+        if cur_kind() == TK_IDENT:
+            ann_name = cur_val()
             advance()
+        elif cur_kind() == TK_STACK:
+            advance()
+        # @transparent struct → pass flag=2 via stack_alloc field
+        if str_eq(ann_name, "transparent") == 1:
+            if cur_kind() == TK_STRUCT:
+                return parse_struct_decl_transparent()
         return parse_statement()
 
     # Identifier: var decl, assignment, function call, method call

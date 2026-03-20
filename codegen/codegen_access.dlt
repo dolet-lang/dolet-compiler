@@ -268,8 +268,30 @@ fun gen_instance_method_call(node: i64) -> str:
     mangled: str = Str.concat(Str.concat(base_type, "_"), mname)
 
     # Build argument list (self + args) and collect arg types for overload
+    # Check if self is a value type (primitive / transparent)
+    resolved_ot: str = resolve_type_full(base_type)
+    self_val: i32 = 0
+    if is_int_type(resolved_ot) == 1:
+        self_val = 1
+    elif is_float_type(resolved_ot) == 1:
+        self_val = 1
+    elif str_eq(resolved_ot, "bool") == 1:
+        self_val = 1
+    elif str_eq(resolved_ot, "char") == 1:
+        self_val = 1
+    elif is_int_type(base_type) == 1:
+        self_val = 1
+    elif is_float_type(base_type) == 1:
+        self_val = 1
+    elif str_eq(base_type, "bool") == 1:
+        self_val = 1
+    elif str_eq(base_type, "char") == 1:
+        self_val = 1
+
     arg_str: str = obj_ptr
     type_str: str = "!llvm.ptr"
+    if self_val == 1:
+        type_str = mlir_type(resolved_ot)
     call_arg_types: str = ""
 
     ac: i32 = 0

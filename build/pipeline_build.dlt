@@ -435,6 +435,8 @@ fun resolve_keyword(name: str) -> i32:
         return TK_PASS
     if str_eq(name, "extend") == 1:
         return TK_EXTEND
+    if str_eq(name, "type") == 1:
+        return TK_TYPE_ALIAS
     if str_eq(name, "true") == 1:
         return TK_BOOL
     if str_eq(name, "false") == 1:
@@ -455,36 +457,6 @@ fun resolve_keyword(name: str) -> i32:
         return TK_ARRAY
     if str_eq(name, "stack") == 1:
         return TK_STACK
-    if str_eq(name, "i8") == 1:
-        return TK_I8
-    if str_eq(name, "i16") == 1:
-        return TK_I16
-    if str_eq(name, "i32") == 1:
-        return TK_I32
-    if str_eq(name, "i64") == 1:
-        return TK_I64
-    if str_eq(name, "i128") == 1:
-        return TK_I128
-    if str_eq(name, "ptr") == 1:
-        return TK_PTR
-    if str_eq(name, "u8") == 1:
-        return TK_U8
-    if str_eq(name, "u16") == 1:
-        return TK_U16
-    if str_eq(name, "u32") == 1:
-        return TK_U32
-    if str_eq(name, "u64") == 1:
-        return TK_U64
-    if str_eq(name, "u128") == 1:
-        return TK_U128
-    if str_eq(name, "f32") == 1:
-        return TK_F32
-    if str_eq(name, "f64") == 1:
-        return TK_F64
-    if str_eq(name, "str") == 1:
-        return TK_STR_TYPE
-    if str_eq(name, "char") == 1:
-        return TK_CHAR_TYPE
     if str_eq(name, "int") == 1:
         return TK_TYPE
     if str_eq(name, "float") == 1:
@@ -492,8 +464,6 @@ fun resolve_keyword(name: str) -> i32:
     if str_eq(name, "double") == 1:
         return TK_TYPE
     if str_eq(name, "string") == 1:
-        return TK_TYPE
-    if str_eq(name, "bool") == 1:
         return TK_TYPE
     return TK_IDENT
 
@@ -2502,36 +2472,6 @@ fun skip_newlines() -> i32:
 # Token Kind Checks
 # ==========================================
 fun is_type_token(k: i32) -> i32:
-    if k == TK_I8:
-        return 1
-    if k == TK_I16:
-        return 1
-    if k == TK_I32:
-        return 1
-    if k == TK_I64:
-        return 1
-    if k == TK_I128:
-        return 1
-    if k == TK_PTR:
-        return 1
-    if k == TK_U8:
-        return 1
-    if k == TK_U16:
-        return 1
-    if k == TK_U32:
-        return 1
-    if k == TK_U64:
-        return 1
-    if k == TK_U128:
-        return 1
-    if k == TK_F32:
-        return 1
-    if k == TK_F64:
-        return 1
-    if k == TK_STR_TYPE:
-        return 1
-    if k == TK_CHAR_TYPE:
-        return 1
     return 0
 
 fun is_comparison_op(k: i32) -> i32:
@@ -2600,36 +2540,6 @@ fun is_literal_token(k: i32) -> i32:
     return 0
 
 fun token_to_type_str(k: i32) -> str:
-    if k == TK_I8:
-        return "i8"
-    if k == TK_I16:
-        return "i16"
-    if k == TK_I32:
-        return "i32"
-    if k == TK_I64:
-        return "i64"
-    if k == TK_I128:
-        return "i128"
-    if k == TK_PTR:
-        return "ptr"
-    if k == TK_U8:
-        return "u8"
-    if k == TK_U16:
-        return "u16"
-    if k == TK_U32:
-        return "u32"
-    if k == TK_U64:
-        return "u64"
-    if k == TK_U128:
-        return "u128"
-    if k == TK_F32:
-        return "f32"
-    if k == TK_F64:
-        return "f64"
-    if k == TK_STR_TYPE:
-        return "str"
-    if k == TK_CHAR_TYPE:
-        return "char"
     if k == TK_LIST:
         return "list"
     if k == TK_MAP:
@@ -3932,6 +3842,13 @@ fun parse_struct_decl(is_abstract: i64) -> i64:
 
     return mk_struct_decl(name, fields, 0, base_class, methods, is_abstract, 0, parents)
 
+# @transparent struct — parse normally then set flag=2 in stack_alloc field
+fun parse_struct_decl_transparent() -> i64:
+    node: i64 = parse_struct_decl(0)
+    # Set stack_alloc (offset +56) to 2 = transparent marker
+    Memory.write_i64(node + 56, 2)
+    return node
+
 # ==========================================
 # Enum Declaration
 # enum Name:
@@ -4437,11 +4354,19 @@ fun parse_statement() -> i64:
             return mk_self_field(sfname)
         return mk_self()
 
-    # Annotation: @stack, @inline, etc. — skip and parse next statement
+    # Annotation: @stack, @inline, @transparent, etc.
     if k == TK_AT:
         advance()
-        if cur_kind() == TK_IDENT or cur_kind() == TK_STACK:
+        ann_name: str = ""
+        if cur_kind() == TK_IDENT:
+            ann_name = cur_val()
             advance()
+        elif cur_kind() == TK_STACK:
+            advance()
+        # @transparent struct → pass flag=2 via stack_alloc field
+        if str_eq(ann_name, "transparent") == 1:
+            if cur_kind() == TK_STRUCT:
+                return parse_struct_decl_transparent()
         return parse_statement()
 
     # Identifier: var decl, assignment, function call, method call
@@ -4985,6 +4910,89 @@ fun get_struct_fields(name: str) -> i64:
     return 0
 
 # ==========================================
+# Transparent Struct Registry
+# @transparent struct maps to its inner raw type
+# ==========================================
+g_trans_names: i64 = 0
+g_trans_inner: i64 = 0
+g_trans_count: i32 = 0
+
+fun init_transparent_registry():
+    g_trans_names = Memory.malloc_zeroed(128 * 8)
+    g_trans_inner = Memory.malloc_zeroed(128 * 8)
+    g_trans_count = 0
+
+fun register_transparent(name: str, inner_type: str):
+    off: i64 = (g_trans_count as i64) * 8
+    Memory.write_i64(g_trans_names + off, name as i64)
+    Memory.write_i64(g_trans_inner + off, inner_type as i64)
+    g_trans_count = g_trans_count + 1
+
+fun is_transparent_type(name: str) -> i32:
+    i: i32 = 0
+    while i < g_trans_count:
+        off: i64 = (i as i64) * 8
+        tn: str = Memory.read_i64(g_trans_names + off) as str
+        if str_eq(tn, name) == 1:
+            return 1
+        i = i + 1
+    return 0
+
+fun get_transparent_inner(name: str) -> str:
+    i: i32 = 0
+    while i < g_trans_count:
+        off: i64 = (i as i64) * 8
+        tn: str = Memory.read_i64(g_trans_names + off) as str
+        if str_eq(tn, name) == 1:
+            return Memory.read_i64(g_trans_inner + off) as str
+        i = i + 1
+    return ""
+
+# ==========================================
+# Type Alias Registry
+# type i32 = I32 → resolve i32 to I32
+# ==========================================
+g_alias_names: i64 = 0
+g_alias_targets: i64 = 0
+g_alias_count: i32 = 0
+
+fun init_alias_registry():
+    g_alias_names = Memory.malloc_zeroed(128 * 8)
+    g_alias_targets = Memory.malloc_zeroed(128 * 8)
+    g_alias_count = 0
+
+fun register_alias(name: str, target: str):
+    off: i64 = (g_alias_count as i64) * 8
+    Memory.write_i64(g_alias_names + off, name as i64)
+    Memory.write_i64(g_alias_targets + off, target as i64)
+    g_alias_count = g_alias_count + 1
+
+fun resolve_alias(name: str) -> str:
+    i: i32 = 0
+    while i < g_alias_count:
+        off: i64 = (i as i64) * 8
+        an: str = Memory.read_i64(g_alias_names + off) as str
+        if str_eq(an, name) == 1:
+            return Memory.read_i64(g_alias_targets + off) as str
+        i = i + 1
+    return ""
+
+# Resolve type through alias + transparent chain
+# i32 → I32 → __i32 (transparent inner)
+fun resolve_type_full(name: str) -> str:
+    # Step 1: check alias
+    target: str = resolve_alias(name)
+    if str_eq(target, "") == 0:
+        # Step 2: if aliased to transparent struct, return inner type
+        if is_transparent_type(target) == 1:
+            return get_transparent_inner(target)
+        return target
+    # Step 3: if name itself is transparent, return inner type
+    if is_transparent_type(name) == 1:
+        return get_transparent_inner(name)
+    return name
+
+# ==========================================
 # Enum Type Registry
 # ==========================================
 g_enum_names: i64 = 0
@@ -5123,6 +5131,29 @@ g_continue_label: str = ""
 # MLIR Type Mapping
 # ==========================================
 fun mlir_type(dolet_type: str) -> str:
+    # Compiler intrinsic types (__i32 → LLVM i32, etc.)
+    if str_eq(dolet_type, "__i8") == 1:
+        return "i8"
+    if str_eq(dolet_type, "__i16") == 1:
+        return "i16"
+    if str_eq(dolet_type, "__i32") == 1:
+        return "i32"
+    if str_eq(dolet_type, "__i64") == 1:
+        return "i64"
+    if str_eq(dolet_type, "__i128") == 1:
+        return "i128"
+    if str_eq(dolet_type, "__f32") == 1:
+        return "f32"
+    if str_eq(dolet_type, "__f64") == 1:
+        return "f64"
+    if str_eq(dolet_type, "__ptr") == 1:
+        return "!llvm.ptr"
+    if str_eq(dolet_type, "__bool") == 1:
+        return "i1"
+    if str_eq(dolet_type, "__char") == 1:
+        return "i8"
+    if str_eq(dolet_type, "__str") == 1:
+        return "!llvm.ptr"
     if str_eq(dolet_type, "int") == 1:
         return "i32"
     if str_eq(dolet_type, "i8") == 1:
@@ -5422,6 +5453,8 @@ fun init_all_registries():
     init_scopes()
     init_fun_sigs()
     init_struct_registry()
+    init_transparent_registry()
+    init_alias_registry()
     init_enum_registry()
     init_global_vars()
     init_static_fields()
@@ -5466,6 +5499,17 @@ fun is_int_type(t: str) -> i32:
         return 1
     if str_eq(t, "u128") == 1:
         return 1
+    # Intrinsic integer types
+    if str_eq(t, "__i8") == 1:
+        return 1
+    if str_eq(t, "__i16") == 1:
+        return 1
+    if str_eq(t, "__i32") == 1:
+        return 1
+    if str_eq(t, "__i64") == 1:
+        return 1
+    if str_eq(t, "__i128") == 1:
+        return 1
     return 0
 
 fun is_float_type(t: str) -> i32:
@@ -5477,12 +5521,19 @@ fun is_float_type(t: str) -> i32:
         return 1
     if str_eq(t, "double") == 1:
         return 1
+    # Intrinsic float types
+    if str_eq(t, "__f32") == 1:
+        return 1
+    if str_eq(t, "__f64") == 1:
+        return 1
     return 0
 
 fun is_string_type(t: str) -> i32:
     if str_eq(t, "string") == 1:
         return 1
     if str_eq(t, "str") == 1:
+        return 1
+    if str_eq(t, "__str") == 1:
         return 1
     return 0
 
@@ -7760,9 +7811,33 @@ fun gen_method_def(struct_name: str, node: i64):
     g_tmp_counter = 0
 
     # Build param list
+    # Check if this is a value type (primitive / transparent wrapper)
+    resolved_st: str = resolve_type_full(struct_name)
+    self_is_value: i32 = 0
+    if is_int_type(resolved_st) == 1:
+        self_is_value = 1
+    elif is_float_type(resolved_st) == 1:
+        self_is_value = 1
+    elif str_eq(resolved_st, "bool") == 1:
+        self_is_value = 1
+    elif str_eq(resolved_st, "char") == 1:
+        self_is_value = 1
+    # Also check intrinsic types directly
+    elif is_int_type(struct_name) == 1:
+        self_is_value = 1
+    elif is_float_type(struct_name) == 1:
+        self_is_value = 1
+    elif str_eq(struct_name, "bool") == 1:
+        self_is_value = 1
+    elif str_eq(struct_name, "char") == 1:
+        self_is_value = 1
+
     param_str: str = ""
     if is_static == 0:
-        param_str = "%self: !llvm.ptr"
+        if self_is_value == 1:
+            param_str = Str.concat("%self: ", mlir_type(resolved_st))
+        else:
+            param_str = "%self: !llvm.ptr"
     pc: i32 = 0
     if params != 0:
         pc = nl_count(params)
@@ -8234,8 +8309,30 @@ fun gen_instance_method_call(node: i64) -> str:
     mangled: str = Str.concat(Str.concat(base_type, "_"), mname)
 
     # Build argument list (self + args) and collect arg types for overload
+    # Check if self is a value type (primitive / transparent)
+    resolved_ot: str = resolve_type_full(base_type)
+    self_val: i32 = 0
+    if is_int_type(resolved_ot) == 1:
+        self_val = 1
+    elif is_float_type(resolved_ot) == 1:
+        self_val = 1
+    elif str_eq(resolved_ot, "bool") == 1:
+        self_val = 1
+    elif str_eq(resolved_ot, "char") == 1:
+        self_val = 1
+    elif is_int_type(base_type) == 1:
+        self_val = 1
+    elif is_float_type(base_type) == 1:
+        self_val = 1
+    elif str_eq(base_type, "bool") == 1:
+        self_val = 1
+    elif str_eq(base_type, "char") == 1:
+        self_val = 1
+
     arg_str: str = obj_ptr
     type_str: str = "!llvm.ptr"
+    if self_val == 1:
+        type_str = mlir_type(resolved_ot)
     call_arg_types: str = ""
 
     ac: i32 = 0
@@ -8492,40 +8589,52 @@ fun collect_declarations(ast: i64):
             sname: str = Memory.read_i64(node + 8) as str
             fields: i64 = Memory.read_i64(node + 16)
             base_class: str = Memory.read_i64(node + 32) as str
-            # Merge parent fields if struct extends another
-            if str_eq(base_class, "") == 0:
-                parent_fields: i64 = get_struct_fields(base_class)
-                if parent_fields != 0:
-                    pfc: i32 = nl_count(parent_fields)
-                    # Create merged field list: parent fields first, then child fields
-                    merged: i64 = mk_node_list(64)
-                    pi: i32 = 0
-                    while pi < pfc:
-                        nl_add(merged, nl_get(parent_fields, pi))
-                        pi = pi + 1
-                    # Add child-specific fields
-                    if fields != 0:
-                        cfc: i32 = nl_count(fields)
-                        ci: i32 = 0
-                        while ci < cfc:
-                            nl_add(merged, nl_get(fields, ci))
-                            ci = ci + 1
-                    fields = merged
-            if fields != 0:
-                register_struct(sname, fields)
-            # Register inline method signatures with param types (methods at +40)
-            smethods: i64 = Memory.read_i64(node + 40)
-            if smethods != 0:
-                smc: i32 = nl_count(smethods)
-                sj: i32 = 0
-                while sj < smc:
-                    smnode: i64 = nl_get(smethods, sj)
-                    smname: str = Memory.read_i64(smnode + 8) as str
-                    smret: str = Memory.read_i64(smnode + 24) as str
-                    smangled: str = Str.concat(Str.concat(sname, "_"), smname)
-                    register_fun_sig(smangled, smret)
-                    register_impl_method(sname, smname, smnode)
-                    sj = sj + 1
+            s_stack_alloc: i64 = Memory.read_i64(node + 56)
+
+            # @transparent struct — register as transparent, not as regular struct
+            if s_stack_alloc == 2:
+                # Get first (and only) field's type as inner raw type
+                if fields != 0:
+                    if nl_count(fields) > 0:
+                        tf: i64 = nl_get(fields, 0)
+                        inner_t: str = Memory.read_i64(tf + 16) as str
+                        register_transparent(sname, inner_t)
+                i = i + 1
+            else:
+                # Merge parent fields if struct extends another
+                if str_eq(base_class, "") == 0:
+                    parent_fields: i64 = get_struct_fields(base_class)
+                    if parent_fields != 0:
+                        pfc: i32 = nl_count(parent_fields)
+                        # Create merged field list: parent fields first, then child fields
+                        merged: i64 = mk_node_list(64)
+                        pi: i32 = 0
+                        while pi < pfc:
+                            nl_add(merged, nl_get(parent_fields, pi))
+                            pi = pi + 1
+                        # Add child-specific fields
+                        if fields != 0:
+                            cfc: i32 = nl_count(fields)
+                            ci: i32 = 0
+                            while ci < cfc:
+                                nl_add(merged, nl_get(fields, ci))
+                                ci = ci + 1
+                        fields = merged
+                if fields != 0:
+                    register_struct(sname, fields)
+                # Register inline method signatures with param types (methods at +40)
+                smethods: i64 = Memory.read_i64(node + 40)
+                if smethods != 0:
+                    smc: i32 = nl_count(smethods)
+                    sj: i32 = 0
+                    while sj < smc:
+                        smnode: i64 = nl_get(smethods, sj)
+                        smname: str = Memory.read_i64(smnode + 8) as str
+                        smret: str = Memory.read_i64(smnode + 24) as str
+                        smangled: str = Str.concat(Str.concat(sname, "_"), smname)
+                        register_fun_sig(smangled, smret)
+                        register_impl_method(sname, smname, smnode)
+                        sj = sj + 1
 
         # Function definitions — register signatures (with overload support)
         if nt == NODE_FUN_DEF:
@@ -8592,6 +8701,12 @@ fun collect_declarations(ast: i64):
         if nt == NODE_VAR_DECL:
             vname2: str = Memory.read_i64(node + 16) as str
             register_global_var(vname2, node)
+
+        # Type alias: type i32 = I32
+        if nt == NODE_TYPE_ALIAS:
+            aname: str = Memory.read_i64(node + 8) as str
+            atarget: str = Memory.read_i64(node + 16) as str
+            register_alias(aname, atarget)
 
         i = i + 1
 
@@ -8792,9 +8907,12 @@ fun gen_functions(ast: i64):
             IOOps.io_println("[gen_fn] extern done")
         elif nt == NODE_STRUCT_DECL:
             sdbg: str = Memory.read_i64(node + 8) as str
-            IOOps.io_println(Str.concat("[gen_fn] struct: ", sdbg))
-            gen_struct_inline_methods(node)
-            IOOps.io_println("[gen_fn] struct methods done")
+            # Skip @transparent structs — they have no MLIR representation
+            s_sa: i64 = Memory.read_i64(node + 56)
+            if s_sa != 2:
+                IOOps.io_println(Str.concat("[gen_fn] struct: ", sdbg))
+                gen_struct_inline_methods(node)
+                IOOps.io_println("[gen_fn] struct methods done")
         elif nt == NODE_FUN_DEF:
             gen_fun_def(node)
         elif nt == NODE_IMPL_BLOCK:
@@ -9039,21 +9157,6 @@ fun init_tokenizer_constants():
     TK_LIST = 112
     TK_MAP = 113
     TK_ARRAY = 114
-    TK_I8 = 120
-    TK_I16 = 121
-    TK_I32 = 122
-    TK_I64 = 123
-    TK_I128 = 124
-    TK_PTR = 125
-    TK_U8 = 126
-    TK_U16 = 127
-    TK_U32 = 128
-    TK_U64 = 129
-    TK_U128 = 130
-    TK_F32 = 131
-    TK_F64 = 132
-    TK_STR_TYPE = 133
-    TK_CHAR_TYPE = 134
 
 fun init_tokenizer_buffers():
     MAX_TOKENS = 8192
@@ -9138,6 +9241,13 @@ fun load_runtime(exe_dir: str) -> str:
     rt_base: str = Str.concat(exe_dir, "\\..\\library\\std\\runtime\\")
 
     runtime_src: str = ""
+
+    # Auto-import type definitions first (types are library-defined identifiers)
+    std_types_base: str = Str.concat(exe_dir, "\\..\\library\\std\\std\\")
+    r_types: str = read_file_to_string(Str.concat(std_types_base, "types.dlt"))
+    if Memory.strlen(r_types) > 0:
+        runtime_src = Str.concat(runtime_src, Str.concat("\n", r_types))
+
     # Read runtime files in dependency order
     r1: str = read_file_to_string(Str.concat(rt_base, "kernel32_bindings.dlt"))
     if Memory.strlen(r1) > 0:
@@ -9166,6 +9276,18 @@ fun load_runtime(exe_dir: str) -> str:
     r7: str = read_file_to_string(Str.concat(std_base, "io.dlt"))
     if Memory.strlen(r7) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r7))
+
+    # Auto-import transparent type definitions with methods
+    types_base: str = Str.concat(std_base, "types\\")
+    rt_int: str = read_file_to_string(Str.concat(types_base, "integers.dlt"))
+    if Memory.strlen(rt_int) > 0:
+        runtime_src = Str.concat(runtime_src, Str.concat("\n", rt_int))
+    rt_flt: str = read_file_to_string(Str.concat(types_base, "floats.dlt"))
+    if Memory.strlen(rt_flt) > 0:
+        runtime_src = Str.concat(runtime_src, Str.concat("\n", rt_flt))
+    rt_prm: str = read_file_to_string(Str.concat(types_base, "primitives.dlt"))
+    if Memory.strlen(rt_prm) > 0:
+        runtime_src = Str.concat(runtime_src, Str.concat("\n", rt_prm))
 
     # Auto-import collections/list.dlt (list extend methods: size, append, etc.)
     r8: str = read_file_to_string(Str.concat(std_base, "collections\\list.dlt"))
