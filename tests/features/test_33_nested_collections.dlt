@@ -1,0 +1,24 @@
+##############################
+# Test 33: Multi-Dimensional Data
+# Tests nested data using structs (nested generics are future)
+##############################
+
+# Simple matrix using struct
+struct Row:
+    a: i32
+    b: i32
+    c: i32
+
+r1: Row = Row(a=1, b=2, c=3)
+r2: Row = Row(a=4, b=5, c=6)
+
+print(r1.a)
+print(r1.b)
+print(r1.c)
+print(r2.a)
+print(r2.b)
+print(r2.c)
+
+# Sum
+total: i32 = r1.a + r1.b + r1.c + r2.a + r2.b + r2.c
+print(total)

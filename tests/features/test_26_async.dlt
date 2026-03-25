@@ -1,0 +1,14 @@
+##############################
+# Test 26: Async/Await
+# Tests async function declaration and await
+##############################
+
+async fun fetch_value() -> i32:
+    return 42
+
+async fun compute() -> i32:
+    val: i32 = await fetch_value()
+    return val * 2
+
+result: i32 = await compute()
+print(result)

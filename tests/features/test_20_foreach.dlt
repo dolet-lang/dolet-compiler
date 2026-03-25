@@ -1,0 +1,21 @@
+##############################
+# Test 20: For-Each Loop
+# Tests iterating over collections
+##############################
+
+# List iteration with <T> syntax
+items: list<i32> = [10, 20, 30]
+
+total: i32 = 0
+for item in items:
+    total = total + item
+
+print(total)
+
+# Array iteration
+arr: array<i32> = [1, 2, 3, 4, 5]
+sum: i32 = 0
+for val in arr:
+    sum = sum + val
+
+print(sum)

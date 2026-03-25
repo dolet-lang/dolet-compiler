@@ -1,0 +1,44 @@
+##############################
+# Test 21: Static Methods & Fields
+# Tests static fun and static field access
+##############################
+
+struct MathHelper:
+    value: i32 = 0
+
+impl MathHelper:
+    static fun add(a: i32, b: i32) -> i32:
+        return a + b
+
+    static fun multiply(a: i32, b: i32) -> i32:
+        return a * b
+
+    static fun square(x: i32) -> i32:
+        return x * x
+
+# Call static methods
+print(MathHelper.add(10, 20))
+print(MathHelper.multiply(5, 6))
+print(MathHelper.square(7))
+
+# Static constructor pattern
+struct Color:
+    r: i32
+    g: i32
+    b: i32
+
+impl Color:
+    static fun red() -> Color:
+        return Color(r=255, g=0, b=0)
+
+    static fun green() -> Color:
+        return Color(r=0, g=255, b=0)
+
+    fun to_str() -> str:
+        return @"({self.r}, {self.g}, {self.b})"
+
+c: Color = Color.red()
+print(c.to_str())
+
+c2: Color = Color.green()
+print(c2.to_str())

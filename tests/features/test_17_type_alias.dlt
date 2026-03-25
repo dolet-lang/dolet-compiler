@@ -1,0 +1,25 @@
+##############################
+# Test 17: Type Aliases
+# Tests type alias declarations
+##############################
+
+# Basic type alias
+type UserID = i64
+type Score = i32
+type Name = str
+
+# Using aliases
+id: UserID = 12345 as i64
+score: Score = 100
+player: Name = "Ali"
+
+# Print via Convert (i64/i32 need conversion to str for print)
+print(Convert.i64_to_str(id))
+print(Convert.i32_to_str(score))
+print(player)
+
+# Type alias in function parameter
+fun show_score(s: Score):
+    print(Convert.i32_to_str(s))
+
+show_score(99)

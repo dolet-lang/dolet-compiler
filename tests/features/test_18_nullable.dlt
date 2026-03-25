@@ -1,0 +1,26 @@
+##############################
+# Test 18: Nullable Variables
+# Tests nullable declarations and null checks
+##############################
+
+# Nullable string — default to empty, not null
+name: str = ""
+
+if name == "":
+    print("name is empty")
+
+# Assign a value
+name = "Dolet"
+print(name)
+
+# Nullable struct pointer
+struct Box:
+    value: i32
+
+b: Box = Box(value=42)
+print(b.value)
+
+# Test with explicit null and print
+msg?: str = null
+msg = "Hello Nullable"
+print(msg)

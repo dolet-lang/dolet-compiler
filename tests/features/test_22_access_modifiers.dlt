@@ -1,0 +1,27 @@
+##############################
+# Test 22: Access Modifiers
+# Tests public, private, protected fields
+##############################
+
+struct Account:
+    public username: str
+    private password: str
+    balance: f64 = 0.0
+
+impl Account:
+    fun get_balance(self) -> f64:
+        return self.balance
+
+    fun check_password(self, input: str) -> bool:
+        return self.password == input
+
+    fun deposit(self, amount: f64):
+        self.balance = self.balance + amount
+
+a: Account = Account(username="Ali", password="secret123")
+print(a.username)
+a.deposit(100.0)
+print(a.get_balance())
+print(a.check_password("secret123"))
+print(a.check_password("wrong"))
+

@@ -1,0 +1,26 @@
+##############################
+# Test 28: Field Access
+# Tests struct field access patterns
+##############################
+
+struct Point:
+    x: i32
+    y: i32
+
+struct Line:
+    start: Point
+    end_pt: Point
+
+# Basic field access
+p: Point = Point(x=10, y=20)
+print(p.x)
+print(p.y)
+
+# Nested field access via intermediate variable
+l: Line = Line(start=Point(x=1, y=2), end_pt=Point(x=3, y=4))
+s: Point = l.start
+e: Point = l.end_pt
+print(s.x)
+print(s.y)
+print(e.x)
+print(e.y)

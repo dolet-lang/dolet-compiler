@@ -701,6 +701,11 @@ g_continue_label: str = ""
 # ==========================================
 # MLIR Type Mapping
 fun mlir_type(dolet_type: str) -> str:
+    # Resolve type aliases first (e.g. type UserID = i64)
+    alias_resolved: str = resolve_alias(dolet_type)
+    if str_eq(alias_resolved, "") == 0:
+        return mlir_type(alias_resolved)
+
     # Direct struct type checks (for transparent types like I32, I64)
     if str_eq(dolet_type, "I8") == 1:
         return "i8"

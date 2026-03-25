@@ -5153,6 +5153,11 @@ g_continue_label: str = ""
 # ==========================================
 # MLIR Type Mapping
 fun mlir_type(dolet_type: str) -> str:
+    # Resolve type aliases first (e.g. type UserID = i64)
+    alias_resolved: str = resolve_alias(dolet_type)
+    if str_eq(alias_resolved, "") == 0:
+        return mlir_type(alias_resolved)
+
     # Direct struct type checks (for transparent types like I32, I64)
     if str_eq(dolet_type, "I8") == 1:
         return "i8"
@@ -5673,6 +5678,16 @@ fun wider_int_type(a: str, b: str) -> str:
 # Implicit Cast
 # ==========================================
 fun implicit_cast(value: str, from_type: str, to_type: str) -> str:
+    # Resolve aliases only for unknown types (not built-in i32/i64/f32/f64/str/etc.)
+    if is_int_type(from_type) == 0 and is_float_type(from_type) == 0 and is_string_type(from_type) == 0 and str_eq(from_type, "bool") == 0 and str_eq(from_type, "ptr") == 0 and str_eq(from_type, "unknown") == 0 and str_eq(from_type, "null") == 0:
+        from_resolved: str = resolve_alias(from_type)
+        if str_eq(from_resolved, "") == 0:
+            return implicit_cast(value, from_resolved, to_type)
+    if is_int_type(to_type) == 0 and is_float_type(to_type) == 0 and is_string_type(to_type) == 0 and str_eq(to_type, "bool") == 0 and str_eq(to_type, "ptr") == 0 and str_eq(to_type, "unknown") == 0 and str_eq(to_type, "null") == 0:
+        to_resolved: str = resolve_alias(to_type)
+        if str_eq(to_resolved, "") == 0:
+            return implicit_cast(value, from_type, to_resolved)
+
     from_m: str = mlir_type(from_type)
     to_m: str = mlir_type(to_type)
 
@@ -6027,8 +6042,18 @@ fun gen_expr(node: i64, expected: str) -> str:
     if nt == NODE_CHAR_LIT:
         return gen_char_lit(node, expected)
 
-    # Null literal
+    # Null literal — emit type-appropriate zero
     if nt == NODE_NULL_LIT:
+        if is_int_type(expected) == 1:
+            null_mt: str = mlir_type(expected)
+            null_tmp: str = new_tmp()
+            emit_ind(Str.concat(Str.concat(Str.concat(null_tmp, " = llvm.mlir.constant(0 : "), null_mt), Str.concat(") : ", null_mt)))
+            return null_tmp
+        if is_float_type(expected) == 1:
+            null_mt2: str = mlir_type(expected)
+            null_tmp2: str = new_tmp()
+            emit_ind(Str.concat(Str.concat(Str.concat(null_tmp2, " = llvm.mlir.constant(0.0 : "), null_mt2), Str.concat(") : ", null_mt2)))
+            return null_tmp2
         return emit_zero_ptr()
 
     # Variable reference
@@ -6560,25 +6585,41 @@ fun gen_is_null(node: i64) -> str:
     expr_node: i64 = Memory.read_i64(node + 8)
     et: str = infer_expr_type(expr_node)
     val: str = gen_expr(expr_node, et)
-    # Cast to ptr if not already a pointer type
-    if is_string_type(et) == 0 and is_struct_type(et) == 0 and str_eq(et, "ptr") == 0 and str_eq(et, "null") == 0:
+    em: str = mlir_type(et)
+    # Integer types: compare to 0
+    if is_int_type(et) == 1:
+        zero_val: str = new_tmp()
+        emit_ind(Str.concat(Str.concat(Str.concat(zero_val, " = llvm.mlir.constant(0 : "), em), Str.concat(") : ", em)))
+        result: str = new_tmp()
+        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(result, " = llvm.icmp \"eq\" "), val), Str.concat(", ", zero_val)), Str.concat(" : ", em)))
+        return result
+    # Pointer/string/struct types: compare to null pointer
+    if str_eq(em, "!llvm.ptr") == 0:
         val = implicit_cast(val, et, "ptr")
     null_val: str = emit_zero_ptr()
-    result: str = new_tmp()
-    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(result, " = llvm.icmp \"eq\" "), val), Str.concat(", ", null_val)), " : !llvm.ptr"))
-    return result
+    result2: str = new_tmp()
+    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(result2, " = llvm.icmp \"eq\" "), val), Str.concat(", ", null_val)), " : !llvm.ptr"))
+    return result2
 
 fun gen_is_not_null(node: i64) -> str:
     expr_node: i64 = Memory.read_i64(node + 8)
     et: str = infer_expr_type(expr_node)
     val: str = gen_expr(expr_node, et)
-    # Cast to ptr if not already a pointer type
-    if is_string_type(et) == 0 and is_struct_type(et) == 0 and str_eq(et, "ptr") == 0 and str_eq(et, "null") == 0:
+    em: str = mlir_type(et)
+    # Integer types: compare to 0
+    if is_int_type(et) == 1:
+        zero_val: str = new_tmp()
+        emit_ind(Str.concat(Str.concat(Str.concat(zero_val, " = llvm.mlir.constant(0 : "), em), Str.concat(") : ", em)))
+        result: str = new_tmp()
+        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(result, " = llvm.icmp \"ne\" "), val), Str.concat(", ", zero_val)), Str.concat(" : ", em)))
+        return result
+    # Pointer/string/struct types: compare to null pointer
+    if str_eq(em, "!llvm.ptr") == 0:
         val = implicit_cast(val, et, "ptr")
     null_val: str = emit_zero_ptr()
-    result: str = new_tmp()
-    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(result, " = llvm.icmp \"ne\" "), val), Str.concat(", ", null_val)), " : !llvm.ptr"))
-    return result
+    result2: str = new_tmp()
+    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(result2, " = llvm.icmp \"ne\" "), val), Str.concat(", ", null_val)), " : !llvm.ptr"))
+    return result2
 
 # ==========================================
 # String Concat
@@ -6928,6 +6969,10 @@ fun gen_struct_instantiation(node: i64) -> str:
                 if def_val_node != 0:
                     # Generate the default value expression
                     dfval: str = gen_expr(def_val_node, dftype)
+                    # Implicit cast if needed (e.g. f64 literal for f32 field)
+                    def_actual: str = infer_expr_type(def_val_node)
+                    if str_eq(def_actual, dftype) == 0 and str_eq(def_actual, "unknown") == 0:
+                        dfval = implicit_cast(dfval, def_actual, dftype)
                     emit_store(dfval, dfp, dft_mlir)
                 else:
                     # No default — store zero

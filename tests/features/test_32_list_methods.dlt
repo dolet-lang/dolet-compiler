@@ -1,0 +1,21 @@
+##############################
+# Test 32: List Methods
+# Tests list creation and size
+##############################
+
+# Create list with <T> syntax
+nums: list<i32> = [10, 20, 30, 40, 50]
+print(nums.size())
+
+# Empty list
+empty: list<i32> = []
+print(empty.size())
+
+# Check is_empty
+print(empty.is_empty())
+
+# List with strings
+names: list<str> = ["Alice", "Bob", "Charlie"]
+print(names.size())
+for i in names:
+    print(i)

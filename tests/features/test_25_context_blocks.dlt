@@ -1,0 +1,30 @@
+##############################
+# Test 25: Resource Management
+# Tests manual resource patterns (context blocks are future)
+##############################
+
+# Simulating resource management with explicit close
+struct Resource:
+    name: str
+    is_open: i32 = 0
+
+impl Resource:
+    static fun open(n: str) -> Resource:
+        r: Resource = Resource(name=n)
+        r.is_open = 1
+        return r
+
+    fun close(self):
+        self.is_open = 0
+
+    fun read(self) -> str:
+        if self.is_open == 1:
+            return self.name
+        return "closed"
+
+# Manual resource management
+r: Resource = Resource.open("data.txt")
+content: str = r.read()
+print(content)
+r.close()
+print(r.is_open)

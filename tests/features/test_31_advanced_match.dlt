@@ -1,0 +1,47 @@
+##############################
+# Test 31: Advanced Match
+# Tests match with multiple patterns and enum matching
+##############################
+
+# Match with multiple case values
+x: i32 = 5
+match x:
+    case 1, 2, 3:
+        print("small")
+    case 4, 5, 6:
+        print("medium")
+    case 7, 8, 9:
+        print("large")
+    else:
+        print("other")
+
+# Match with range
+y: i32 = 42
+match y:
+    case 1..10:
+        print("1-10")
+    case 11..50:
+        print("11-50")
+    case 51..100:
+        print("51-100")
+    else:
+        print("out of range")
+
+# Enum match
+enum Color:
+    RED
+    GREEN
+    BLUE
+
+fun describe_color(c: i32):
+    match c:
+        case Color.RED:
+            print("Red like fire")
+        case Color.GREEN:
+            print("Green like grass")
+        case Color.BLUE:
+            print("Blue like sky")
+
+describe_color(Color.RED)
+describe_color(Color.BLUE)
+describe_color(Color.GREEN)

@@ -1,0 +1,29 @@
+##############################
+# Test 29: Inheritance & Methods
+# Tests struct inheritance with methods
+##############################
+
+struct Animal:
+    name: str
+    sound: str
+
+impl Animal:
+    fun get_name(self) -> str:
+        return self.name
+
+    fun get_sound(self) -> str:
+        return self.sound
+
+struct Dog extends Animal:
+    breed: str
+
+impl Dog:
+    fun describe(self) -> str:
+        return self.breed
+
+# Create dog with inherited fields
+d: Dog = Dog(name="Rex", sound="Woof", breed="Husky")
+print(d.name)
+print(d.sound)
+print(d.breed)
+print(d.describe())

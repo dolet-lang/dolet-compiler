@@ -1,0 +1,24 @@
+##############################
+# Test 27: Stack Allocation
+# Tests @stack struct annotation
+##############################
+
+@stack
+struct Vec2:
+    x: f32
+    y: f32
+
+v: Vec2 = Vec2(x=10.0, y=20.0)
+print(v.x)
+print(v.y)
+
+@stack
+struct Color3:
+    r: i32
+    g: i32
+    b: i32
+
+c: Color3 = Color3(r=255, g=128, b=0)
+print(c.r)
+print(c.g)
+print(c.b)
