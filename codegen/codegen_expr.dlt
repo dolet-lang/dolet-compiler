@@ -862,6 +862,13 @@ fun gen_map_literal(node: i64) -> str:
     size_val: str = emit_const_i32(ec)
     emit_store(size_val, mem_p, "i32")
 
+    # Store capacity at +4
+    map_cap_val: str = emit_const_i32(ec)
+    map_cap_ptr: str = new_tmp()
+    map_c4off: str = emit_const_i64(4)
+    emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(map_cap_ptr, " = llvm.getelementptr "), mem_p), Str.concat("[", Str.concat(map_c4off, "]"))), " : (!llvm.ptr, i64) -> !llvm.ptr, i8"))
+    emit_store(map_cap_val, map_cap_ptr, "i32")
+
     # Store entries
     i: i32 = 0
     while i < ec:

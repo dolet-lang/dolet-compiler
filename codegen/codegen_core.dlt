@@ -833,6 +833,8 @@ fun mlir_type(dolet_type: str) -> str:
         return "!llvm.ptr"
     if str_eq(dolet_type, "list") == 1:
         return "!llvm.ptr"
+    if str_eq(dolet_type, "map") == 1:
+        return "!llvm.ptr"
     if str_eq(dolet_type, "null") == 1:
         return "!llvm.ptr"
     # ptr[T] — all typed pointers are opaque pointers in MLIR
