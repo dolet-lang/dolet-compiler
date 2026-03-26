@@ -4080,8 +4080,13 @@ fun parse_extend_block() -> i64:
             break
         if cur_kind() == TK_NEWLINE:
             skip_newlines()
-        elif cur_kind() == TK_FUN:
+        elif cur_kind() == TK_FUN or cur_kind() == TK_STATIC:
+            mis: i64 = 0
+            if cur_kind() == TK_STATIC:
+                mis = 1
+                advance()
             m: i64 = parse_fun_def(0)
+            Memory.write_i64(m + 72, mis)
             nl_add(methods, m)
             if cur_kind() == TK_NEWLINE:
                 skip_newlines()
@@ -9044,6 +9049,7 @@ fun collect_declarations(ast: i64):
                             epi = epi + 1
                     emangled: str = register_overload(emangled_base, ept_str)
                     register_fun_sig(emangled, emret)
+                    register_impl_method(etname, emname, enode)
                     j3 = j3 + 1
 
         # Extern blocks — only register signatures here, emit declarations later
@@ -9590,42 +9596,56 @@ fun get_exe_dir() -> str:
     return PathOps.get_exe_directory()
 
 fun load_runtime(exe_dir: str) -> str:
-    # Runtime is at: <exe_dir>/../library/std/runtime/  (bin/doletc.exe → library/std/runtime/)
-    rt_base: str = Str.concat(exe_dir, "\\..\\library\\std\\runtime\\")
+    # New library layout:
+    #   bin/doletc.exe
+    #   library/sys/windows/    — extern declarations
+    #   library/core/           — zero-OS: memory read/write + types
+    #   library/platform/       — platform-specific: alloc, io, str, etc.
+    #   library/std/            — standard library: io, string, etc.
+    sys_base:   str = Str.concat(exe_dir, "\\..\\library\\sys\\windows\\")
+    core_base:  str = Str.concat(exe_dir, "\\..\\library\\core\\")
+    plat_base:  str = Str.concat(exe_dir, "\\..\\library\\platform\\")
+    std_base_l: str = Str.concat(exe_dir, "\\..\\library\\std\\")
+    types_base: str = Str.concat(core_base, "types\\")
 
     runtime_src: str = ""
 
-    # Read runtime files in dependency order
-    r1: str = read_file_to_string(Str.concat(rt_base, "kernel32_bindings.dlt"))
+    # 1. Extern declarations (Windows ABI)
+    r1: str = read_file_to_string(Str.concat(sys_base, "kernel32.dlt"))
     if Memory.strlen(r1) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r1))
 
-    r2: str = read_file_to_string(Str.concat(rt_base, "memory.dlt"))
+    # 2. Core: pure memory read/write ops (no OS dependency)
+    r2: str = read_file_to_string(Str.concat(core_base, "memory.dlt"))
     if Memory.strlen(r2) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r2))
 
-    # math.dlt skipped — complex standalone functions, not needed for basic runtime
+    # 3. Platform: heap allocator (extends Memory with malloc/free via HeapAlloc)
+    r3: str = read_file_to_string(Str.concat(plat_base, "alloc.dlt"))
+    if Memory.strlen(r3) > 0:
+        runtime_src = Str.concat(runtime_src, Str.concat("\n", r3))
 
-    r4: str = read_file_to_string(Str.concat(rt_base, "convert.dlt"))
+    # 4. Platform: string formatting (Convert struct)
+    r4: str = read_file_to_string(Str.concat(plat_base, "format.dlt"))
     if Memory.strlen(r4) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r4))
 
-    r5: str = read_file_to_string(Str.concat(rt_base, "strOps.dlt"))
+    # 5. Platform: string operations (Str struct)
+    r5: str = read_file_to_string(Str.concat(plat_base, "str.dlt"))
     if Memory.strlen(r5) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r5))
 
-    r6: str = read_file_to_string(Str.concat(rt_base, "ioOps.dlt"))
+    # 6. Platform: I/O operations (IOOps struct)
+    r6: str = read_file_to_string(Str.concat(plat_base, "io.dlt"))
     if Memory.strlen(r6) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r6))
 
-    # Auto-import std library (io + type definitions with methods)
-    std_base: str = Str.concat(exe_dir, "\\..\\library\\std\\std\\")
-    r7: str = read_file_to_string(Str.concat(std_base, "io.dlt"))
+    # 7. Std: print() overloads
+    r7: str = read_file_to_string(Str.concat(std_base_l, "io.dlt"))
     if Memory.strlen(r7) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", r7))
 
-    # Auto-import type definitions: structs + aliases + methods
-    types_base: str = Str.concat(std_base, "types\\")
+    # 8-11. Core types: @transparent wrappers + collections
     rt_int: str = read_file_to_string(Str.concat(types_base, "integers.dlt"))
     if Memory.strlen(rt_int) > 0:
         runtime_src = Str.concat(runtime_src, Str.concat("\n", rt_int))
@@ -9916,7 +9936,7 @@ fun main() -> i32:
             IOOps.io_println(Str.concat("Runtime: ", Str.concat(Convert.i64_to_str(rt_len), " chars")))
 
     # Resolve and load user imports
-    std_base: str = Str.concat(exe_dir, "\\..\\library\\std\\std\\")
+    std_base: str = Str.concat(exe_dir, "\\..\\library\\")
     src_dir: str = get_file_dir(input_path)
     if Memory.strlen(src_dir) == 0:
         src_dir = "."
@@ -9955,7 +9975,7 @@ fun main() -> i32:
     # Phase 4: Full pipeline (MLIR → LLVM IR → Object → Executable)
     IOOps.io_println("[4/4] Building executable...")
     tools_dir: str = Str.concat(exe_dir, "\\..\\tools\\")
-    sys_libs: str = Str.concat(exe_dir, "\\..\\library\\std\\sys\\windows")
+    sys_libs: str = Str.concat(exe_dir, "\\..\\library\\sys\\windows")
 
     # Step 1: mlir-translate (MLIR → LLVM IR)
     cmd1: str = Str.concat(Str.concat(Str.concat(Str.concat("\"", tools_dir), "mlir-translate.exe\" --mlir-to-llvmir \""), mlir_path), Str.concat("\" -o \"", Str.concat(ll_path, "\"")))

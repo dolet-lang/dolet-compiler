@@ -389,8 +389,13 @@ fun parse_extend_block() -> i64:
             break
         if cur_kind() == TK_NEWLINE:
             skip_newlines()
-        elif cur_kind() == TK_FUN:
+        elif cur_kind() == TK_FUN or cur_kind() == TK_STATIC:
+            mis: i64 = 0
+            if cur_kind() == TK_STATIC:
+                mis = 1
+                advance()
             m: i64 = parse_fun_def(0)
+            Memory.write_i64(m + 72, mis)
             nl_add(methods, m)
             if cur_kind() == TK_NEWLINE:
                 skip_newlines()

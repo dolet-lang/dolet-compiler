@@ -245,6 +245,7 @@ fun collect_declarations(ast: i64):
                             epi = epi + 1
                     emangled: str = register_overload(emangled_base, ept_str)
                     register_fun_sig(emangled, emret)
+                    register_impl_method(etname, emname, enode)
                     j3 = j3 + 1
 
         # Extern blocks — only register signatures here, emit declarations later
