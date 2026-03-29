@@ -11225,7 +11225,8 @@ fun try_resolve_module(mod_name: str, std_base: str, src_dir: str) -> str:
 
     # 2c. Try packages dir (dist layout): <exe_dir>/../packages/<mod_path>/mod.dlt
     pkg_base: str = Str.concat(std_base, "..\\packages\\")
-    pp: str = Str.concat(Str.concat(pkg_base, mod_path), "\\mod.dlt")
+    pkg_dir: str = Str.concat(Str.concat(pkg_base, mod_path), "\\")
+    pp: str = Str.concat(pkg_dir, "mod.dlt")
     if file_exists(pp) == 1:
         return pp
 
@@ -11563,6 +11564,71 @@ fun extract_extern_libs(src: str) -> str:
             i = i + 1
     return result
 
+# Scan user source for "import X" and return -libpath entries for packages/X/ dirs
+fun extract_pkg_libpaths(src: str, pkg_base: str) -> str:
+    slen: i64 = Memory.strlen(src)
+    result: str = ""
+    i: i64 = 0
+    c0: i8 = 0 as i8
+    c1: i8 = 0 as i8
+    c2: i8 = 0 as i8
+    c3: i8 = 0 as i8
+    c4: i8 = 0 as i8
+    c5: i8 = 0 as i8
+    c6: i8 = 0 as i8
+    in_comment: i32 = 0
+    bk: i64 = 0
+    bc: i8 = 0 as i8
+    name_start: i64 = 0
+    name_end: i64 = 0
+    nc: i8 = 0 as i8
+    mod_name: str = ""
+    pkg_mod: str = ""
+    pkg_dir: str = ""
+    # Scan for pattern: "import " (ASCII: 'i'=105 'm'=109 'p'=112 'o'=111 'r'=114 't'=116 ' '=32)
+    while i < slen - 7:
+        c0 = Memory.read_i8((src as i64) + i)
+        if c0 == 105:
+            c1 = Memory.read_i8((src as i64) + i + 1)
+            c2 = Memory.read_i8((src as i64) + i + 2)
+            c3 = Memory.read_i8((src as i64) + i + 3)
+            c4 = Memory.read_i8((src as i64) + i + 4)
+            c5 = Memory.read_i8((src as i64) + i + 5)
+            c6 = Memory.read_i8((src as i64) + i + 6)
+            if c1 == 109 and c2 == 112 and c3 == 111 and c4 == 114 and c5 == 116 and c6 == 32:
+                in_comment = 0
+                bk = i - 1
+                while bk >= 0:
+                    bc = Memory.read_i8((src as i64) + bk)
+                    if bc == 10:
+                        break
+                    if bc == 35:
+                        in_comment = 1
+                        break
+                    bk = bk - 1
+                if in_comment == 1:
+                    i = i + 1
+                    continue
+                name_start = i + 7
+                name_end = name_start
+                while name_end < slen:
+                    nc = Memory.read_i8((src as i64) + name_end)
+                    if nc == 10 or nc == 13 or nc == 32 or nc == 9:
+                        break
+                    name_end = name_end + 1
+                if name_end > name_start:
+                    mod_name = Str.substring(src, name_start, name_end)
+                    pkg_mod = Str.concat(Str.concat(pkg_base, mod_name), "\\mod.dlt")
+                    if file_exists(pkg_mod) == 1:
+                        pkg_dir = Str.concat(pkg_base, mod_name)
+                        result = Str.concat(result, Str.concat(" -libpath:\"", Str.concat(pkg_dir, "\"")))
+                i = name_end + 1
+            else:
+                i = i + 1
+        else:
+            i = i + 1
+    return result
+
 # ==========================================
 # Main Compiler Driver
 # ==========================================
@@ -11747,6 +11813,10 @@ fun main() -> i32:
     cmd3 = Str.concat(cmd3, Str.concat(Str.concat("\"", obj_path), "\" "))
     cmd3 = Str.concat(cmd3, Str.concat(Str.concat("-out:\"", output_exe), "\" "))
     cmd3 = Str.concat(cmd3, Str.concat(Str.concat("-libpath:\"", sys_libs), "\" "))
+    pkg_base2: str = Str.concat(std_base, "..\\packages\\")
+    pkg_libpaths: str = extract_pkg_libpaths(user_src, pkg_base2)
+    cmd3 = Str.concat(cmd3, pkg_libpaths)
+    cmd3 = Str.concat(cmd3, " ")
     # Extract extern lib names from source for linking
     extern_lib_flags: str = extract_extern_libs(source)
     cmd3 = Str.concat(cmd3, Str.concat("-defaultlib:kernel32 -subsystem:console -entry:main", extern_lib_flags))
