@@ -223,7 +223,10 @@ fun parse_ident_expr() -> i64:
     # Function call: name(args)
     if cur_kind() == TK_LPAREN:
         cargs: i64 = parse_arg_list()
-        return mk_fun_call(name, cargs, 0)
+        fc_node: i64 = mk_fun_call(name, cargs, 0)
+        if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+            return parse_chained_dot(fc_node)
+        return fc_node
 
     # Dot access: name.something
     if cur_kind() == TK_DOT:
@@ -254,9 +257,14 @@ fun parse_dot_access(first: str) -> i64:
         if cur_kind() == TK_LPAREN:
             nargs: i64 = parse_arg_list()
             nfc: i8 = Memory.read_i8(member as i64)
+            ns_node: i64 = 0
             if nfc >= 65 and nfc <= 90:
-                return mk_ns_struct_inst(first, member, nargs, 0)
-            return mk_ns_fun_call(first, member, nargs, 0)
+                ns_node = mk_ns_struct_inst(first, member, nargs, 0)
+            else:
+                ns_node = mk_ns_fun_call(first, member, nargs, 0)
+            if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+                return parse_chained_dot(ns_node)
+            return ns_node
         # ns.Struct.method(args) or ns.sub.something
         if cur_kind() == TK_DOT:
             eat(TK_DOT)
@@ -265,9 +273,14 @@ fun parse_dot_access(first: str) -> i64:
             if cur_kind() == TK_LPAREN:
                 targs: i64 = parse_arg_list()
                 tfc: i8 = Memory.read_i8(member as i64)
+                ns_node2: i64 = 0
                 if tfc >= 65 and tfc <= 90:
-                    return mk_ns_static_method(first, member, third, targs)
-                return mk_ns_fun_call(first, third, targs, 0)
+                    ns_node2 = mk_ns_static_method(first, member, third, targs)
+                else:
+                    ns_node2 = mk_ns_fun_call(first, third, targs, 0)
+                if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+                    return parse_chained_dot(ns_node2)
+                return ns_node2
             # ns.Struct.field — simple access
             return mk_ns_access(first, member)
         # ns.symbol
@@ -278,9 +291,15 @@ fun parse_dot_access(first: str) -> i64:
         margs: i64 = parse_arg_list()
         # If first char is uppercase, treat as static method
         fc: i8 = Memory.read_i8(first as i64)
+        node: i64 = 0
         if fc >= 65 and fc <= 90:
-            return mk_static_method(first, member, margs)
-        return mk_inst_method(first, member, margs)
+            node = mk_static_method(first, member, margs)
+        else:
+            node = mk_inst_method(first, member, margs)
+        # Check for chaining continuation (direct dot or newline+dot)
+        if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+            return parse_chained_dot(node)
+        return node
 
     # Chained dot: Name.member.something
     if cur_kind() == TK_DOT:
@@ -326,7 +345,21 @@ fun parse_dot_access(first: str) -> i64:
 # ==========================================
 fun parse_chained_dot(base: i64) -> i64:
     result: i64 = base
-    while cur_kind() == TK_DOT:
+    while 1 == 1:
+        # Direct dot continuation
+        if cur_kind() == TK_DOT:
+            pass
+        elif cur_kind() == TK_NEWLINE:
+            # Peek past newlines to see if next non-NL token is TK_DOT
+            save_pos: i32 = p_pos
+            skip_newlines()
+            if cur_kind() == TK_DOT:
+                pass
+            else:
+                p_pos = save_pos
+                break
+        else:
+            break
         advance()
         nxt: str = cur_val()
         eat(TK_IDENT)

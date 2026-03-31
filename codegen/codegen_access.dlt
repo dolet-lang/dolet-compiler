@@ -192,6 +192,14 @@ fun gen_static_method_call(node: i64) -> str:
     mname: str = Memory.read_i64(node + 16) as str
     args_list: i64 = Memory.read_i64(node + 24)
 
+    # .new() constructor — redirect to struct instantiation
+    if str_eq(mname, "new") == 1 and is_struct_type(sname) == 1:
+        proxy: i64 = Memory.malloc_zeroed(NODE_SIZE as i64)
+        Memory.write_i32(proxy, NODE_FUN_CALL)
+        Memory.write_i64(proxy + 8, sname as i64)
+        Memory.write_i64(proxy + 16, args_list)
+        return gen_fun_call(proxy)
+
     # Mangled name: StructName_methodName
     mangled: str = Str.concat(Str.concat(sname, "_"), mname)
 

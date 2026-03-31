@@ -1,0 +1,36 @@
+import std.[io]
+
+struct Vec3:
+    x: f32 = 0.0
+    y: f32 = 0.0
+    z: f32 = 0.0
+
+struct Point:
+    a: i32 = 0
+    b: i32 = 0
+
+fun main():
+    # Positional args
+    v: Vec3 = Vec3(1.0, 2.0, 3.0)
+    print("Vec3 positional args:")
+    print(v.x)
+    print(v.y)
+    print(v.z)
+
+    # Named args still work
+    v2: Vec3 = Vec3(x=10.0, y=20.0, z=30.0)
+    print("Vec3 named args:")
+    print(v2.x)
+    print(v2.y)
+    print(v2.z)
+
+    # Mixed: positional args
+    p: Point = Point(42, 99)
+    print("Point positional:")
+    print(p.a)
+    print(p.b)
+
+    # Default values when no args
+    v3: Vec3 = Vec3()
+    print("Vec3 defaults:")
+    print(v3.x)

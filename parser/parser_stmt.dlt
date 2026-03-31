@@ -26,8 +26,14 @@ fun parse_if_stmt() -> i64:
     if cur_kind() == TK_COLON:
         advance()
 
-    skip_newlines()
-    then_body: i64 = parse_indented_block(if_indent)
+    # Single-line if: `if cond: statement`
+    then_body: i64 = 0
+    if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
+        then_body = mk_node_list(4)
+        nl_add(then_body, parse_statement())
+    else:
+        skip_newlines()
+        then_body = parse_indented_block(if_indent)
     else_body: i64 = 0
 
     skip_newlines()
@@ -38,8 +44,13 @@ fun parse_if_stmt() -> i64:
         elif_cond: i64 = parse_expression()
         if cur_kind() == TK_COLON:
             advance()
-        skip_newlines()
-        elif_body: i64 = parse_indented_block(if_indent)
+        elif_body: i64 = 0
+        if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
+            elif_body = mk_node_list(4)
+            nl_add(elif_body, parse_statement())
+        else:
+            skip_newlines()
+            elif_body = parse_indented_block(if_indent)
 
         # Create elif as nested IfNode
         elif_else: i64 = 0
@@ -54,8 +65,12 @@ fun parse_if_stmt() -> i64:
             eat(TK_ELSE)
             if cur_kind() == TK_COLON:
                 advance()
-            skip_newlines()
-            elif_else = parse_indented_block(if_indent)
+            if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
+                elif_else = mk_node_list(4)
+                nl_add(elif_else, parse_statement())
+            else:
+                skip_newlines()
+                elif_else = parse_indented_block(if_indent)
 
         elif_node: i64 = mk_if(elif_cond, elif_body, elif_else)
         else_body = mk_node_list(4)
@@ -65,15 +80,21 @@ fun parse_if_stmt() -> i64:
         eat(TK_ELSE)
         if cur_kind() == TK_COLON:
             advance()
-        skip_newlines()
 
-        # else if (two keywords)
-        if cur_kind() == TK_IF:
-            else_if: i64 = parse_if_stmt()
+        # Single-line else: `else: statement`
+        if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
             else_body = mk_node_list(4)
-            nl_add(else_body, else_if)
+            nl_add(else_body, parse_statement())
         else:
-            else_body = parse_indented_block(if_indent)
+            skip_newlines()
+
+            # else if (two keywords)
+            if cur_kind() == TK_IF:
+                else_if: i64 = parse_if_stmt()
+                else_body = mk_node_list(4)
+                nl_add(else_body, else_if)
+            else:
+                else_body = parse_indented_block(if_indent)
 
     return mk_if(cond, then_body, else_body)
 
@@ -86,8 +107,13 @@ fun parse_while_stmt() -> i64:
     cond: i64 = parse_expression()
     if cur_kind() == TK_COLON:
         advance()
-    skip_newlines()
-    body: i64 = parse_indented_block(wi)
+    body: i64 = 0
+    if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
+        body = mk_node_list(4)
+        nl_add(body, parse_statement())
+    else:
+        skip_newlines()
+        body = parse_indented_block(wi)
     return mk_while(cond, body)
 
 # ==========================================
@@ -120,8 +146,13 @@ fun parse_for_stmt() -> i64:
 
         if cur_kind() == TK_COLON:
             advance()
-        skip_newlines()
-        body: i64 = parse_indented_block(fi)
+        body: i64 = 0
+        if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
+            body = mk_node_list(4)
+            nl_add(body, parse_statement())
+        else:
+            skip_newlines()
+            body = parse_indented_block(fi)
 
         # Determine comparison operator based on step direction
         # If explicit negative step => use >=
@@ -162,8 +193,13 @@ fun parse_for_stmt() -> i64:
     # For-each: for item in collection
     if cur_kind() == TK_COLON:
         advance()
-    skip_newlines()
-    fe_body: i64 = parse_indented_block(fi)
+    fe_body: i64 = 0
+    if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
+        fe_body = mk_node_list(4)
+        nl_add(fe_body, parse_statement())
+    else:
+        skip_newlines()
+        fe_body = parse_indented_block(fi)
     return mk_for_each(var_name, "", "", start_expr, fe_body)
 
 # ==========================================
@@ -395,7 +431,10 @@ fun parse_var_decl_ident() -> i64:
     # Function call: name(args)
     if cur_kind() == TK_LPAREN:
         cargs: i64 = parse_arg_list()
-        return mk_fun_call(name, cargs, 0)
+        fc_node: i64 = mk_fun_call(name, cargs, 0)
+        if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+            return parse_chained_dot(fc_node)
+        return fc_node
 
     # Dot access: name.something (method call, field access/assign)
     if cur_kind() == TK_DOT:
@@ -431,9 +470,14 @@ fun parse_dot_stmt(name: str) -> i64:
         if cur_kind() == TK_LPAREN:
             nargs: i64 = parse_arg_list()
             nfc: i8 = Memory.read_i8(member as i64)
+            ns_node: i64 = 0
             if nfc >= 65 and nfc <= 90:
-                return mk_ns_struct_inst(name, member, nargs, 0)
-            return mk_ns_fun_call(name, member, nargs, 0)
+                ns_node = mk_ns_struct_inst(name, member, nargs, 0)
+            else:
+                ns_node = mk_ns_fun_call(name, member, nargs, 0)
+            if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+                return parse_chained_dot(ns_node)
+            return ns_node
         if cur_kind() == TK_DOT:
             eat(TK_DOT)
             third: str = cur_val()
@@ -441,9 +485,14 @@ fun parse_dot_stmt(name: str) -> i64:
             if cur_kind() == TK_LPAREN:
                 targs: i64 = parse_arg_list()
                 tfc: i8 = Memory.read_i8(member as i64)
+                ns_node2: i64 = 0
                 if tfc >= 65 and tfc <= 90:
-                    return mk_ns_static_method(name, member, third, targs)
-                return mk_ns_fun_call(name, third, targs, 0)
+                    ns_node2 = mk_ns_static_method(name, member, third, targs)
+                else:
+                    ns_node2 = mk_ns_fun_call(name, third, targs, 0)
+                if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+                    return parse_chained_dot(ns_node2)
+                return ns_node2
             return mk_ns_access(name, member)
         return mk_ns_access(name, member)
 
@@ -451,9 +500,15 @@ fun parse_dot_stmt(name: str) -> i64:
     if cur_kind() == TK_LPAREN:
         margs: i64 = parse_arg_list()
         fc: i8 = Memory.read_i8(name as i64)
+        node: i64 = 0
         if fc >= 65 and fc <= 90:
-            return mk_static_method(name, member, margs)
-        return mk_inst_method(name, member, margs)
+            node = mk_static_method(name, member, margs)
+        else:
+            node = mk_inst_method(name, member, margs)
+        # Check for chaining continuation (direct dot or newline+dot)
+        if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+            return parse_chained_dot(node)
+        return node
 
     # Field assignment: name.field = expr
     if cur_kind() == TK_ASSIGN:

@@ -1,0 +1,30 @@
+import std.[io]
+
+fun main():
+    x: i32 = 10
+
+    # Single-line if
+    if x > 5: print("x > 5")
+
+    # Single-line if with else (multi-line style — else on next line)
+    if x > 100:
+        print("big")
+    else:
+        print("not big")
+
+    # Single-line while (will execute once then break)
+    count: i32 = 0
+    while count < 1: count = count + 1
+    print("count after while:")
+    print(count)
+
+    # Single-line for
+    total: i32 = 0
+    for i in 0 to 5: total = total + i
+    print("total 0..5:")
+    print(total)
+
+    # Ensure normal multi-line still works
+    if x == 10:
+        print("x is 10")
+        print("confirmed")

@@ -57,6 +57,10 @@ for %%f in (
     test_36_selective_import
     test_37_selective_bracket
     test_38_annotations
+    test_39_positional_args
+    test_40_new_constructor
+    test_41_single_line_if
+    test_42_method_chain
 ) do (
     echo [TEST] %%f
     if exist "%TESTS_DIR%\%%f.dlt" (

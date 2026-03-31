@@ -946,8 +946,19 @@ fun gen_struct_instantiation(node: i64) -> str:
     i: i32 = 0
     while i < fvc:
         fv_node: i64 = nl_get(field_vals, i)
-        fname: str = Memory.read_i64(fv_node + 8) as str
-        fval_node: i64 = Memory.read_i64(fv_node + 16)
+        fname: str = ""
+        fval_node: i64 = 0
+        # Check if named arg (NODE_FIELD_VAL) or positional arg (raw expr)
+        if nd_type(fv_node) == NODE_FIELD_VAL:
+            fname = Memory.read_i64(fv_node + 8) as str
+            fval_node = Memory.read_i64(fv_node + 16)
+        else:
+            # Positional arg — map by field order
+            pos_fields: i64 = get_struct_fields(sname)
+            if pos_fields != 0 and i < nl_count(pos_fields):
+                pos_fnode: i64 = nl_get(pos_fields, i)
+                fname = Memory.read_i64(pos_fnode + 8) as str
+            fval_node = fv_node
         fidx: i32 = get_field_index(sname, fname)
         if fidx >= 0:
             ftype: str = get_field_type(sname, fname)
@@ -977,9 +988,14 @@ fun gen_struct_instantiation(node: i64) -> str:
             j: i32 = 0
             while j < fvc:
                 fv2: i64 = nl_get(field_vals, j)
-                fv2_name: str = Memory.read_i64(fv2 + 8) as str
-                if str_eq(fv2_name, dfname) == 1:
-                    was_set = 1
+                if nd_type(fv2) == NODE_FIELD_VAL:
+                    fv2_name: str = Memory.read_i64(fv2 + 8) as str
+                    if str_eq(fv2_name, dfname) == 1:
+                        was_set = 1
+                else:
+                    # Positional arg at index j maps to field at index j
+                    if j == di:
+                        was_set = 1
                 j = j + 1
             if was_set == 0:
                 dftype: str = Memory.read_i64(dfnode + 16) as str

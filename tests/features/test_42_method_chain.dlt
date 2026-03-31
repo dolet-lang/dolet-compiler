@@ -1,0 +1,29 @@
+import std.[io, string]
+
+struct Builder:
+    name: str = ""
+    count: i32 = 0
+
+impl Builder:
+    fun set_name(self, n: str) -> Builder:
+        self.name = n
+        return self
+
+    fun set_count(self, c: i32) -> Builder:
+        self.count = c
+        return self
+
+    fun describe(self) -> str:
+        return Str.concat3(self.name, " count=", i32_to_str(self.count))
+
+fun main():
+    # Step-by-step method chaining (each step returns Builder)
+    b: Builder = Builder(name="hello")
+    b = b.set_name("test")
+    b = b.set_count(42)
+    print(b.describe())
+
+    # Verify impl methods work
+    b2: Builder = Builder(name="world")
+    b2 = b2.set_count(99)
+    print(b2.describe())

@@ -2942,7 +2942,10 @@ fun parse_ident_expr() -> i64:
     # Function call: name(args)
     if cur_kind() == TK_LPAREN:
         cargs: i64 = parse_arg_list()
-        return mk_fun_call(name, cargs, 0)
+        fc_node: i64 = mk_fun_call(name, cargs, 0)
+        if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+            return parse_chained_dot(fc_node)
+        return fc_node
 
     # Dot access: name.something
     if cur_kind() == TK_DOT:
@@ -2972,9 +2975,14 @@ fun parse_dot_access(first: str) -> i64:
         if cur_kind() == TK_LPAREN:
             nargs: i64 = parse_arg_list()
             nfc: i8 = Memory.read_i8(member as i64)
+            ns_node: i64 = 0
             if nfc >= 65 and nfc <= 90:
-                return mk_ns_struct_inst(first, member, nargs, 0)
-            return mk_ns_fun_call(first, member, nargs, 0)
+                ns_node = mk_ns_struct_inst(first, member, nargs, 0)
+            else:
+                ns_node = mk_ns_fun_call(first, member, nargs, 0)
+            if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+                return parse_chained_dot(ns_node)
+            return ns_node
         if cur_kind() == TK_DOT:
             eat(TK_DOT)
             third: str = cur_val()
@@ -2982,9 +2990,14 @@ fun parse_dot_access(first: str) -> i64:
             if cur_kind() == TK_LPAREN:
                 targs: i64 = parse_arg_list()
                 tfc: i8 = Memory.read_i8(member as i64)
+                ns_node2: i64 = 0
                 if tfc >= 65 and tfc <= 90:
-                    return mk_ns_static_method(first, member, third, targs)
-                return mk_ns_fun_call(first, third, targs, 0)
+                    ns_node2 = mk_ns_static_method(first, member, third, targs)
+                else:
+                    ns_node2 = mk_ns_fun_call(first, third, targs, 0)
+                if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+                    return parse_chained_dot(ns_node2)
+                return ns_node2
             return mk_ns_access(first, member)
         return mk_ns_access(first, member)
 
@@ -2993,9 +3006,15 @@ fun parse_dot_access(first: str) -> i64:
         margs: i64 = parse_arg_list()
         # If first char is uppercase, treat as static method
         fc: i8 = Memory.read_i8(first as i64)
+        node: i64 = 0
         if fc >= 65 and fc <= 90:
-            return mk_static_method(first, member, margs)
-        return mk_inst_method(first, member, margs)
+            node = mk_static_method(first, member, margs)
+        else:
+            node = mk_inst_method(first, member, margs)
+        # Check for chaining continuation (direct dot or newline+dot)
+        if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+            return parse_chained_dot(node)
+        return node
 
     # Chained dot: Name.member.something
     if cur_kind() == TK_DOT:
@@ -3041,7 +3060,21 @@ fun parse_dot_access(first: str) -> i64:
 # ==========================================
 fun parse_chained_dot(base: i64) -> i64:
     result: i64 = base
-    while cur_kind() == TK_DOT:
+    while 1 == 1:
+        # Direct dot continuation
+        if cur_kind() == TK_DOT:
+            pass
+        elif cur_kind() == TK_NEWLINE:
+            # Peek past newlines to see if next non-NL token is TK_DOT
+            save_pos: i32 = p_pos
+            skip_newlines()
+            if cur_kind() == TK_DOT:
+                pass
+            else:
+                p_pos = save_pos
+                break
+        else:
+            break
         advance()
         nxt: str = cur_val()
         eat(TK_IDENT)
@@ -3368,8 +3401,14 @@ fun parse_if_stmt() -> i64:
     if cur_kind() == TK_COLON:
         advance()
 
-    skip_newlines()
-    then_body: i64 = parse_indented_block(if_indent)
+    # Single-line if: `if cond: statement`
+    then_body: i64 = 0
+    if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
+        then_body = mk_node_list(4)
+        nl_add(then_body, parse_statement())
+    else:
+        skip_newlines()
+        then_body = parse_indented_block(if_indent)
     else_body: i64 = 0
 
     skip_newlines()
@@ -3380,8 +3419,13 @@ fun parse_if_stmt() -> i64:
         elif_cond: i64 = parse_expression()
         if cur_kind() == TK_COLON:
             advance()
-        skip_newlines()
-        elif_body: i64 = parse_indented_block(if_indent)
+        elif_body: i64 = 0
+        if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
+            elif_body = mk_node_list(4)
+            nl_add(elif_body, parse_statement())
+        else:
+            skip_newlines()
+            elif_body = parse_indented_block(if_indent)
 
         # Create elif as nested IfNode
         elif_else: i64 = 0
@@ -3396,8 +3440,12 @@ fun parse_if_stmt() -> i64:
             eat(TK_ELSE)
             if cur_kind() == TK_COLON:
                 advance()
-            skip_newlines()
-            elif_else = parse_indented_block(if_indent)
+            if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
+                elif_else = mk_node_list(4)
+                nl_add(elif_else, parse_statement())
+            else:
+                skip_newlines()
+                elif_else = parse_indented_block(if_indent)
 
         elif_node: i64 = mk_if(elif_cond, elif_body, elif_else)
         else_body = mk_node_list(4)
@@ -3407,15 +3455,21 @@ fun parse_if_stmt() -> i64:
         eat(TK_ELSE)
         if cur_kind() == TK_COLON:
             advance()
-        skip_newlines()
 
-        # else if (two keywords)
-        if cur_kind() == TK_IF:
-            else_if: i64 = parse_if_stmt()
+        # Single-line else: `else: statement`
+        if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
             else_body = mk_node_list(4)
-            nl_add(else_body, else_if)
+            nl_add(else_body, parse_statement())
         else:
-            else_body = parse_indented_block(if_indent)
+            skip_newlines()
+
+            # else if (two keywords)
+            if cur_kind() == TK_IF:
+                else_if: i64 = parse_if_stmt()
+                else_body = mk_node_list(4)
+                nl_add(else_body, else_if)
+            else:
+                else_body = parse_indented_block(if_indent)
 
     return mk_if(cond, then_body, else_body)
 
@@ -3428,8 +3482,13 @@ fun parse_while_stmt() -> i64:
     cond: i64 = parse_expression()
     if cur_kind() == TK_COLON:
         advance()
-    skip_newlines()
-    body: i64 = parse_indented_block(wi)
+    body: i64 = 0
+    if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
+        body = mk_node_list(4)
+        nl_add(body, parse_statement())
+    else:
+        skip_newlines()
+        body = parse_indented_block(wi)
     return mk_while(cond, body)
 
 # ==========================================
@@ -3462,8 +3521,13 @@ fun parse_for_stmt() -> i64:
 
         if cur_kind() == TK_COLON:
             advance()
-        skip_newlines()
-        body: i64 = parse_indented_block(fi)
+        body: i64 = 0
+        if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
+            body = mk_node_list(4)
+            nl_add(body, parse_statement())
+        else:
+            skip_newlines()
+            body = parse_indented_block(fi)
 
         # Determine comparison operator based on step direction
         # If explicit negative step => use >=
@@ -3504,8 +3568,13 @@ fun parse_for_stmt() -> i64:
     # For-each: for item in collection
     if cur_kind() == TK_COLON:
         advance()
-    skip_newlines()
-    fe_body: i64 = parse_indented_block(fi)
+    fe_body: i64 = 0
+    if cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
+        fe_body = mk_node_list(4)
+        nl_add(fe_body, parse_statement())
+    else:
+        skip_newlines()
+        fe_body = parse_indented_block(fi)
     return mk_for_each(var_name, "", "", start_expr, fe_body)
 
 # ==========================================
@@ -3737,7 +3806,10 @@ fun parse_var_decl_ident() -> i64:
     # Function call: name(args)
     if cur_kind() == TK_LPAREN:
         cargs: i64 = parse_arg_list()
-        return mk_fun_call(name, cargs, 0)
+        fc_node: i64 = mk_fun_call(name, cargs, 0)
+        if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+            return parse_chained_dot(fc_node)
+        return fc_node
 
     # Dot access: name.something (method call, field access/assign)
     if cur_kind() == TK_DOT:
@@ -3773,9 +3845,14 @@ fun parse_dot_stmt(name: str) -> i64:
         if cur_kind() == TK_LPAREN:
             nargs: i64 = parse_arg_list()
             nfc: i8 = Memory.read_i8(member as i64)
+            ns_node: i64 = 0
             if nfc >= 65 and nfc <= 90:
-                return mk_ns_struct_inst(name, member, nargs, 0)
-            return mk_ns_fun_call(name, member, nargs, 0)
+                ns_node = mk_ns_struct_inst(name, member, nargs, 0)
+            else:
+                ns_node = mk_ns_fun_call(name, member, nargs, 0)
+            if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+                return parse_chained_dot(ns_node)
+            return ns_node
         if cur_kind() == TK_DOT:
             eat(TK_DOT)
             third: str = cur_val()
@@ -3783,9 +3860,14 @@ fun parse_dot_stmt(name: str) -> i64:
             if cur_kind() == TK_LPAREN:
                 targs: i64 = parse_arg_list()
                 tfc: i8 = Memory.read_i8(member as i64)
+                ns_node2: i64 = 0
                 if tfc >= 65 and tfc <= 90:
-                    return mk_ns_static_method(name, member, third, targs)
-                return mk_ns_fun_call(name, third, targs, 0)
+                    ns_node2 = mk_ns_static_method(name, member, third, targs)
+                else:
+                    ns_node2 = mk_ns_fun_call(name, third, targs, 0)
+                if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+                    return parse_chained_dot(ns_node2)
+                return ns_node2
             return mk_ns_access(name, member)
         return mk_ns_access(name, member)
 
@@ -3793,9 +3875,15 @@ fun parse_dot_stmt(name: str) -> i64:
     if cur_kind() == TK_LPAREN:
         margs: i64 = parse_arg_list()
         fc: i8 = Memory.read_i8(name as i64)
+        node: i64 = 0
         if fc >= 65 and fc <= 90:
-            return mk_static_method(name, member, margs)
-        return mk_inst_method(name, member, margs)
+            node = mk_static_method(name, member, margs)
+        else:
+            node = mk_inst_method(name, member, margs)
+        # Check for chaining continuation (direct dot or newline+dot)
+        if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
+            return parse_chained_dot(node)
+        return node
 
     # Field assignment: name.field = expr
     if cur_kind() == TK_ASSIGN:
@@ -8429,8 +8517,19 @@ fun gen_struct_instantiation(node: i64) -> str:
     i: i32 = 0
     while i < fvc:
         fv_node: i64 = nl_get(field_vals, i)
-        fname: str = Memory.read_i64(fv_node + 8) as str
-        fval_node: i64 = Memory.read_i64(fv_node + 16)
+        fname: str = ""
+        fval_node: i64 = 0
+        # Check if named arg (NODE_FIELD_VAL) or positional arg (raw expr)
+        if nd_type(fv_node) == NODE_FIELD_VAL:
+            fname = Memory.read_i64(fv_node + 8) as str
+            fval_node = Memory.read_i64(fv_node + 16)
+        else:
+            # Positional arg — map by field order
+            pos_fields: i64 = get_struct_fields(sname)
+            if pos_fields != 0 and i < nl_count(pos_fields):
+                pos_fnode: i64 = nl_get(pos_fields, i)
+                fname = Memory.read_i64(pos_fnode + 8) as str
+            fval_node = fv_node
         fidx: i32 = get_field_index(sname, fname)
         if fidx >= 0:
             ftype: str = get_field_type(sname, fname)
@@ -8460,9 +8559,14 @@ fun gen_struct_instantiation(node: i64) -> str:
             j: i32 = 0
             while j < fvc:
                 fv2: i64 = nl_get(field_vals, j)
-                fv2_name: str = Memory.read_i64(fv2 + 8) as str
-                if str_eq(fv2_name, dfname) == 1:
-                    was_set = 1
+                if nd_type(fv2) == NODE_FIELD_VAL:
+                    fv2_name: str = Memory.read_i64(fv2 + 8) as str
+                    if str_eq(fv2_name, dfname) == 1:
+                        was_set = 1
+                else:
+                    # Positional arg at index j maps to field at index j
+                    if j == di:
+                        was_set = 1
                 j = j + 1
             if was_set == 0:
                 dftype: str = Memory.read_i64(dfnode + 16) as str
@@ -10193,6 +10297,14 @@ fun gen_static_method_call(node: i64) -> str:
     sname: str = Memory.read_i64(node + 8) as str
     mname: str = Memory.read_i64(node + 16) as str
     args_list: i64 = Memory.read_i64(node + 24)
+
+    # .new() constructor — redirect to struct instantiation
+    if str_eq(mname, "new") == 1 and is_struct_type(sname) == 1:
+        proxy: i64 = Memory.malloc_zeroed(NODE_SIZE as i64)
+        Memory.write_i32(proxy, NODE_FUN_CALL)
+        Memory.write_i64(proxy + 8, sname as i64)
+        Memory.write_i64(proxy + 16, args_list)
+        return gen_fun_call(proxy)
 
     # Mangled name: StructName_methodName
     mangled: str = Str.concat(Str.concat(sname, "_"), mname)

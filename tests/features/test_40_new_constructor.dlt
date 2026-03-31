@@ -1,0 +1,27 @@
+import std.[io]
+
+struct Config:
+    width: i32 = 800
+    height: i32 = 600
+    title: str = "default"
+
+struct Simple:
+    value: i32 = 0
+
+fun main():
+    # .new() with named args
+    c: Config = Config.new(width=1920, height=1080, title="test")
+    print("Config.new():")
+    print(c.width)
+    print(c.height)
+    print(c.title)
+
+    # .new() with no args (all defaults)
+    s: Simple = Simple.new()
+    print("Simple.new():")
+    print(s.value)
+
+    # .new() with positional args
+    s2: Simple = Simple.new(42)
+    print("Simple.new(42):")
+    print(s2.value)
