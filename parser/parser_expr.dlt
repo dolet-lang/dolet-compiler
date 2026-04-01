@@ -184,7 +184,14 @@ fun parse_primary() -> i64:
             # self.method()
             if cur_kind() == TK_LPAREN:
                 sargs: i64 = parse_arg_list()
-                return mk_inst_method("self", fname, sargs)
+                sm_node: i64 = mk_inst_method("self", fname, sargs)
+                if cur_kind() == TK_DOT:
+                    return parse_chained_dot(sm_node)
+                return sm_node
+            # self.field.method() or self.field.field... (chained dot)
+            if cur_kind() == TK_DOT:
+                sf_base: i64 = mk_field_access("self", fname)
+                return parse_chained_dot(sf_base)
             # self.field
             return mk_self_field(fname)
         return mk_self()

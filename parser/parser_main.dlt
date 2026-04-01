@@ -215,10 +215,17 @@ fun parse_statement() -> i64:
             advance()
             sfname: str = cur_val()
             eat(TK_IDENT)
+            # self.field.method() or self.field.field... (chained dot)
+            if cur_kind() == TK_DOT:
+                sf_base: i64 = mk_field_access("self", sfname)
+                return parse_chained_dot(sf_base)
             # self.method()
             if cur_kind() == TK_LPAREN:
                 sma: i64 = parse_arg_list()
-                return mk_inst_method("self", sfname, sma)
+                sm_node: i64 = mk_inst_method("self", sfname, sma)
+                if cur_kind() == TK_DOT:
+                    return parse_chained_dot(sm_node)
+                return sm_node
             # self.field = expr
             if cur_kind() == TK_ASSIGN:
                 advance()

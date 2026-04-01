@@ -2,7 +2,7 @@
 #  KUBIC DEMO — FPS Game "The Cube"
 #=====================================================
 
-import aecs         [component, system, resource, query]
+#import aecs         [component, system, resource, query]
 import kubic.core   [App, SceneTree]
 import kubic.node3d [Node3D, Camera3D, Light3D, MeshNode3D]
 import kubic.mesh   [CubeMesh, PlaneMesh]
