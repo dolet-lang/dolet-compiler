@@ -259,7 +259,8 @@ fun parse_dot_access(first: str) -> i64:
     eat(TK_IDENT)
 
     # Namespace-qualified access: ns.func() or ns.Struct.method()
-    if is_module_name(first) == 1:
+    # Local variables/params take priority over module names
+    if is_module_name(first) == 1 and is_local_name(first) == 0:
         # ns.func(args) or ns.Struct(args)
         if cur_kind() == TK_LPAREN:
             nargs: i64 = parse_arg_list()

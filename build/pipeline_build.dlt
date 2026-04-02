@@ -2444,6 +2444,41 @@ fun is_module_name(name: str) -> i32:
     return 0
 
 # ==========================================
+# Local Variable/Param Name Registry
+# ==========================================
+g_local_names: i64 = 0
+g_local_count: i32 = 0
+
+fun init_local_names():
+    g_local_names = Memory.malloc_zeroed(1024 * 8)
+    g_local_count = 0
+
+fun register_local_name(name: str):
+    li: i32 = 0
+    while li < g_local_count:
+        loff: i64 = (li as i64) * 8
+        lm: str = Memory.read_i64(g_local_names + loff) as str
+        if str_eq(lm, name) == 1:
+            return
+        li = li + 1
+    off: i64 = (g_local_count as i64) * 8
+    Memory.write_i64(g_local_names + off, name as i64)
+    g_local_count = g_local_count + 1
+
+fun clear_local_names():
+    g_local_count = 0
+
+fun is_local_name(name: str) -> i32:
+    i: i32 = 0
+    while i < g_local_count:
+        off: i64 = (i as i64) * 8
+        m: str = Memory.read_i64(g_local_names + off) as str
+        if str_eq(m, name) == 1:
+            return 1
+        i = i + 1
+    return 0
+
+# ==========================================
 # Error Handling
 # ==========================================
 
@@ -2978,7 +3013,8 @@ fun parse_dot_access(first: str) -> i64:
     eat(TK_IDENT)
 
     # Namespace-qualified access: ns.func() or ns.Struct.method()
-    if is_module_name(first) == 1:
+    # Local variables/params take priority over module names
+    if is_module_name(first) == 1 and is_local_name(first) == 0:
         if cur_kind() == TK_LPAREN:
             nargs: i64 = parse_arg_list()
             nfc: i8 = Memory.read_i8(member as i64)
@@ -3772,6 +3808,7 @@ fun parse_var_decl_ident() -> i64:
     if cur_kind() == TK_COLON:
         advance()
         vtype: str = parse_type_name()
+        register_local_name(name)
         value: i64 = 0
         if cur_kind() == TK_ASSIGN:
             advance()
@@ -3848,7 +3885,8 @@ fun parse_dot_stmt(name: str) -> i64:
     eat(TK_IDENT)
 
     # Namespace-qualified statement: ns.func() or ns.Struct.method()
-    if is_module_name(name) == 1:
+    # Local variables/params take priority over module names
+    if is_module_name(name) == 1 and is_local_name(name) == 0:
         if cur_kind() == TK_LPAREN:
             nargs: i64 = parse_arg_list()
             nfc: i8 = Memory.read_i8(member as i64)
@@ -3993,6 +4031,7 @@ fun parse_fun_def(is_async: i64) -> i64:
     params: i64 = mk_node_list(16)
     is_variadic: i64 = 0
     variadic_param: str = ""
+    clear_local_names()
 
     while cur_kind() != TK_RPAREN:
         pname: str = cur_val()
@@ -4000,6 +4039,7 @@ fun parse_fun_def(is_async: i64) -> i64:
             advance()
         else:
             eat(TK_IDENT)
+            register_local_name(pname)
 
         # Optional nullable: name?
         nullable: i64 = 0
@@ -11620,6 +11660,7 @@ fun init_pipeline():
     init_tokenizer_buffers()
     init_ast_constants()
     init_module_names()
+    init_local_names()
     init_annot_registry()
     # Built-in annotations loaded from library/prelude/annotations.dlt via load_prelude()
 

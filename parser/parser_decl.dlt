@@ -21,6 +21,7 @@ fun parse_fun_def(is_async: i64) -> i64:
     params: i64 = mk_node_list(16)
     is_variadic: i64 = 0
     variadic_param: str = ""
+    clear_local_names()
 
     while cur_kind() != TK_RPAREN:
         pname: str = cur_val()
@@ -28,6 +29,7 @@ fun parse_fun_def(is_async: i64) -> i64:
             advance()
         else:
             eat(TK_IDENT)
+            register_local_name(pname)
 
         # Optional nullable: name?
         nullable: i64 = 0

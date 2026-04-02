@@ -390,6 +390,7 @@ fun parse_var_decl_ident() -> i64:
     if cur_kind() == TK_COLON:
         advance()
         vtype: str = parse_type_name()
+        register_local_name(name)
         value: i64 = 0
         if cur_kind() == TK_ASSIGN:
             advance()
@@ -466,7 +467,8 @@ fun parse_dot_stmt(name: str) -> i64:
     eat(TK_IDENT)
 
     # Namespace-qualified statement: ns.func() or ns.Struct.method()
-    if is_module_name(name) == 1:
+    # Local variables/params take priority over module names
+    if is_module_name(name) == 1 and is_local_name(name) == 0:
         if cur_kind() == TK_LPAREN:
             nargs: i64 = parse_arg_list()
             nfc: i8 = Memory.read_i8(member as i64)
