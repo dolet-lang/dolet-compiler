@@ -109,6 +109,14 @@ fun gen_expr(node: i64, expected: str) -> str:
     if nt == NODE_SELF_FIELD:
         return gen_self_field_access(node)
 
+    # Nested field access (e.g., state.Gamepad.bLeftTrigger)
+    if nt == NODE_NESTED_FIELD:
+        return gen_nested_field_access(node, expected)
+
+    # Nested method call (e.g., self.field.method(args))
+    if nt == NODE_NESTED_METHOD:
+        return gen_nested_method_call(node)
+
     # Self reference
     if nt == NODE_SELF:
         return "%self"

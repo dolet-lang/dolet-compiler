@@ -5301,10 +5301,22 @@ g_out: i64 = 0
 g_out_count: i32 = 0
 g_out_cap: i32 = 65536
 
+# Entry Block Buffer — for hoisting alloca instructions to function entry
+g_entry_buf: i64 = 0
+g_entry_count: i32 = 0
+g_entry_cap: i32 = 8192
+g_entry_active: i32 = 0
+g_entry_insert_pos: i32 = 0
+
 fun init_codegen():
     g_out_cap = 524288
     g_out = Memory.malloc_zeroed((g_out_cap as i64) * 8)
     g_out_count = 0
+    g_entry_cap = 8192
+    g_entry_buf = Memory.malloc_zeroed((g_entry_cap as i64) * 8)
+    g_entry_count = 0
+    g_entry_active = 0
+    g_entry_insert_pos = 0
     g_tmp_counter = 0
     g_label_counter = 0
     g_str_counter = 0
@@ -5335,6 +5347,34 @@ fun emit(line: str):
 
 fun emit_blank():
     emit("")
+
+fun entry_emit(line: str):
+    if g_entry_count >= g_entry_cap:
+        return
+    off: i64 = (g_entry_count as i64) * 8
+    Memory.write_i64(g_entry_buf + off, line as i64)
+    g_entry_count = g_entry_count + 1
+
+fun flush_entry_allocas():
+    if g_entry_count == 0:
+        return
+    # Shift existing g_out lines from insert_pos forward to make room
+    shift_count: i32 = g_out_count - g_entry_insert_pos
+    si: i32 = g_out_count - 1
+    while si >= g_entry_insert_pos:
+        src_off: i64 = (si as i64) * 8
+        dst_off: i64 = ((si + g_entry_count) as i64) * 8
+        Memory.write_i64(g_out + dst_off, Memory.read_i64(g_out + src_off))
+        si = si - 1
+    # Copy entry buffer lines into the gap
+    ei: i32 = 0
+    while ei < g_entry_count:
+        src_off2: i64 = (ei as i64) * 8
+        dst_off2: i64 = ((g_entry_insert_pos + ei) as i64) * 8
+        Memory.write_i64(g_out + dst_off2, Memory.read_i64(g_entry_buf + src_off2))
+        ei = ei + 1
+    g_out_count = g_out_count + g_entry_count
+    g_entry_count = 0
 
 fun get_output_line(idx: i32) -> str:
     off: i64 = (idx as i64) * 8
@@ -6422,6 +6462,13 @@ fun emit_zero_ptr() -> str:
     return tmp
 
 fun emit_alloca(mtype: str) -> str:
+    if g_entry_active == 1:
+        # Hoist alloca to entry block buffer
+        c1: str = new_tmp()
+        entry_emit(Str.concat(ind(), Str.concat(Str.concat(Str.concat(c1, " = llvm.mlir.constant("), Convert.i64_to_str(1)), " : i64) : i64")))
+        alloc: str = new_tmp()
+        entry_emit(Str.concat(ind(), Str.concat(Str.concat(Str.concat(Str.concat(alloc, " = llvm.alloca "), c1), Str.concat(" x ", mtype)), " : (i64) -> !llvm.ptr")))
+        return alloc
     c1: str = emit_const_i64(1)
     alloc: str = new_tmp()
     emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(alloc, " = llvm.alloca "), c1), Str.concat(" x ", mtype)), " : (i64) -> !llvm.ptr"))
@@ -7442,6 +7489,18 @@ fun infer_expr_type(node: i64) -> str:
                 return nf_ft
         return "unknown"
 
+    # Nested method call: resolve base type, then get method return type
+    if ntype == NODE_NESTED_METHOD:
+        nm_base: i64 = Memory.read_i64(node + 8)
+        nm_mname: str = Memory.read_i64(node + 16) as str
+        nm_base_type: str = infer_expr_type(nm_base)
+        if str_eq(nm_base_type, "") == 0 and str_eq(nm_base_type, "unknown") == 0:
+            nm_mangled: str = Str.concat(Str.concat(nm_base_type, "_"), nm_mname)
+            nm_rt: str = get_fun_ret_type(nm_mangled)
+            if str_eq(nm_rt, "unknown") == 0 and str_eq(nm_rt, "") == 0:
+                return nm_rt
+        return "unknown"
+
     if ntype == NODE_SELF_FIELD:
         sf_field: str = Memory.read_i64(node + 8) as str
         sf_struct: str = g_cur_method_struct
@@ -7474,6 +7533,20 @@ fun infer_expr_type(node: i64) -> str:
             if str_eq(im_rt, "unknown") == 0 and str_eq(im_rt, "") == 0:
                 return im_rt
         return "unknown"
+
+    # Namespaced function call: ns.func(args)
+    # If 'ns' is a struct variable, infer as instance method call
+    if ntype == NODE_NS_FUN_CALL:
+        nfc_ns: str = Memory.read_i64(node + 8) as str
+        nfc_fname: str = Memory.read_i64(node + 16) as str
+        nfc_vt: str = get_var_type(nfc_ns)
+        if str_eq(nfc_vt, "unknown") == 0 and is_struct_type(nfc_vt) == 1:
+            nfc_mangled: str = Str.concat(Str.concat(nfc_vt, "_"), nfc_fname)
+            nfc_rt: str = get_fun_ret_type(nfc_mangled)
+            if str_eq(nfc_rt, "unknown") == 0 and str_eq(nfc_rt, "") == 0:
+                return nfc_rt
+        # Normal namespace function: just look up function name
+        return get_fun_ret_type(nfc_fname)
 
     if ntype == NODE_ARRAY_LIT or ntype == NODE_LIST_LIT:
         return "list"
@@ -7736,6 +7809,10 @@ fun gen_expr(node: i64, expected: str) -> str:
     # Nested field access (e.g., state.Gamepad.bLeftTrigger)
     if nt == NODE_NESTED_FIELD:
         return gen_nested_field_access(node, expected)
+
+    # Nested method call (e.g., self.field.method(args))
+    if nt == NODE_NESTED_METHOD:
+        return gen_nested_method_call(node)
 
     # Self field access
     if nt == NODE_SELF_FIELD:
@@ -9561,6 +9638,8 @@ fun gen_statement(node: i64):
         gen_ns_static_method(node)
     elif nt == NODE_INST_METHOD:
         gen_instance_method_call(node)
+    elif nt == NODE_NESTED_METHOD:
+        gen_nested_method_call(node)
     elif nt == NODE_SUPER_METHOD:
         gen_super_method_call(node)
     elif nt == NODE_MATCH:
@@ -9708,8 +9787,22 @@ fun gen_fun_def(node: i64):
         i = i + 1
 
     # Generate body
+    # Activate entry block buffer to hoist allocas
+    old_entry_active: i32 = g_entry_active
+    old_entry_count: i32 = g_entry_count
+    old_entry_insert_pos: i32 = g_entry_insert_pos
+    g_entry_active = 1
+    g_entry_count = 0
+    g_entry_insert_pos = g_out_count
+
     if body != 0:
         gen_block(body)
+
+    # Flush hoisted allocas into function entry block
+    flush_entry_allocas()
+    g_entry_active = old_entry_active
+    g_entry_count = old_entry_count
+    g_entry_insert_pos = old_entry_insert_pos
 
     # Add implicit return if no return at end
     if has_return == 0:
@@ -9928,8 +10021,22 @@ fun gen_method_def(struct_name: str, node: i64):
             arg_idx = arg_idx + 1
             i = i + 1
 
+    # Activate entry block buffer to hoist allocas
+    old_entry_active2: i32 = g_entry_active
+    old_entry_count2: i32 = g_entry_count
+    old_entry_insert_pos2: i32 = g_entry_insert_pos
+    g_entry_active = 1
+    g_entry_count = 0
+    g_entry_insert_pos = g_out_count
+
     if body != 0:
         gen_block(body)
+
+    # Flush hoisted allocas into method entry block
+    flush_entry_allocas()
+    g_entry_active = old_entry_active2
+    g_entry_count = old_entry_count2
+    g_entry_insert_pos = old_entry_insert_pos2
 
     if has_return == 0:
         if body == 0 or block_always_returns(body) == 0:
@@ -10231,6 +10338,79 @@ fun gen_nested_field_ptr(node: i64) -> str:
     return gen_expr(node, fb_type)
 
 # ==========================================
+# Nested Method Call (e.g., self.field.method(args))
+# ==========================================
+fun gen_nested_method_call(node: i64) -> str:
+    base_node: i64 = Memory.read_i64(node + 8)
+    method_name: str = Memory.read_i64(node + 16) as str
+    args_list: i64 = Memory.read_i64(node + 24)
+
+    # Get the pointer to the nested struct field
+    base_ptr: str = gen_nested_field_ptr(base_node)
+
+    # Get the type of the nested struct
+    base_type: str = infer_expr_type(base_node)
+
+    # Mangled name: base_type_method_name
+    mangled: str = Str.concat(Str.concat(base_type, "_"), method_name)
+
+    # Build arg string starting with the nested struct pointer as self
+    arg_str: str = base_ptr
+    type_str: str = "!llvm.ptr"
+
+    ac: i32 = 0
+    if args_list != 0:
+        ac = nl_count(args_list)
+
+    # Look up method for param types
+    method_node3: i64 = find_impl_method(base_type, method_name)
+    method_params3: i64 = 0
+    if method_node3 != 0:
+        method_params3 = Memory.read_i64(method_node3 + 16)
+
+    i: i32 = 0
+    while i < ac:
+        anode: i64 = nl_get(args_list, i)
+        at: str = infer_expr_type(anode)
+        if str_eq(at, "unknown") == 1:
+            at = "i64"
+
+        expected_pt3: str = ""
+        if method_params3 != 0:
+            param_idx3: i32 = i + 1
+            if param_idx3 < nl_count(method_params3):
+                mp_node3: i64 = nl_get(method_params3, param_idx3)
+                expected_pt3 = Memory.read_i64(mp_node3 + 16) as str
+
+        if str_eq(expected_pt3, "") == 0:
+            av: str = gen_expr(anode, expected_pt3)
+            amt: str = mlir_type(expected_pt3)
+            if str_eq(at, expected_pt3) == 0 and str_eq(at, "unknown") == 0:
+                av = implicit_cast(av, at, expected_pt3)
+            arg_str = Str.concat(arg_str, Str.concat(", ", av))
+            type_str = Str.concat(type_str, Str.concat(", ", amt))
+        else:
+            av2: str = gen_expr(anode, at)
+            amt2: str = mlir_type(at)
+            arg_str = Str.concat(arg_str, Str.concat(", ", av2))
+            type_str = Str.concat(type_str, Str.concat(", ", amt2))
+        i = i + 1
+
+    # Get return type
+    ret_type: str = get_fun_ret_type(mangled)
+    ret_mt: str = ""
+    if str_eq(ret_type, "unknown") == 0 and str_eq(ret_type, "") == 0 and str_eq(ret_type, "void") == 0:
+        ret_mt = mlir_type(ret_type)
+
+    if str_eq(ret_mt, "") == 1:
+        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat("llvm.call @", mangled), "("), arg_str), Str.concat(") : (", Str.concat(type_str, ") -> ()"))))
+        return ""
+    else:
+        tmp: str = new_tmp()
+        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(Str.concat(tmp, " = llvm.call @"), mangled), "("), arg_str), Str.concat(") : (", Str.concat(type_str, Str.concat(") -> ", ret_mt)))))
+        return tmp
+
+# ==========================================
 # Self Field Access (self.field in methods)
 # ==========================================
 fun gen_self_field_access(node: i64) -> str:
@@ -10509,8 +10689,22 @@ fun gen_static_method_call(node: i64) -> str:
 # Namespaced Function Call: ns.func(args)
 # ==========================================
 fun gen_ns_fun_call(node: i64) -> str:
+    ns: str = Memory.read_i64(node + 8) as str
     fname: str = Memory.read_i64(node + 16) as str
     args_list: i64 = Memory.read_i64(node + 24)
+
+    # Check if 'ns' is actually a local/global variable with struct type
+    ns_var_type: str = get_var_type(ns)
+    if str_eq(ns_var_type, "unknown") == 0:
+        if is_struct_type(ns_var_type) == 1:
+            # Redirect to instance method call: ns.fname(args)
+            proxy_im: i64 = Memory.malloc_zeroed(88)
+            Memory.write_i32(proxy_im, 88)
+            Memory.write_i64(proxy_im + 8, ns as i64)
+            Memory.write_i64(proxy_im + 16, fname as i64)
+            Memory.write_i64(proxy_im + 24, args_list)
+            return gen_instance_method_call(proxy_im)
+
     proxy: i64 = Memory.malloc_zeroed(64)
     Memory.write_i32(proxy, 61)
     Memory.write_i64(proxy + 8, fname as i64)

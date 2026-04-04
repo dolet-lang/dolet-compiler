@@ -333,6 +333,43 @@ fun infer_expr_type(node: i64) -> str:
                 return im_rt
         return "unknown"
 
+    # Namespaced function call: ns.func(args)
+    # If 'ns' is a struct variable, infer as instance method call
+    if ntype == NODE_NS_FUN_CALL:
+        nfc_ns: str = Memory.read_i64(node + 8) as str
+        nfc_fname: str = Memory.read_i64(node + 16) as str
+        nfc_vt: str = get_var_type(nfc_ns)
+        if str_eq(nfc_vt, "unknown") == 0 and is_struct_type(nfc_vt) == 1:
+            nfc_mangled: str = Str.concat(Str.concat(nfc_vt, "_"), nfc_fname)
+            nfc_rt: str = get_fun_ret_type(nfc_mangled)
+            if str_eq(nfc_rt, "unknown") == 0 and str_eq(nfc_rt, "") == 0:
+                return nfc_rt
+        # Normal namespace function: just look up function name
+        return get_fun_ret_type(nfc_fname)
+
+    # Nested field access: resolve base type, then get field type
+    if ntype == NODE_NESTED_FIELD:
+        nf_base: i64 = Memory.read_i64(node + 8)
+        nf_fname: str = Memory.read_i64(node + 16) as str
+        nf_base_type: str = infer_expr_type(nf_base)
+        if str_eq(nf_base_type, "") == 0 and str_eq(nf_base_type, "unknown") == 0:
+            nf_ft: str = get_field_type(nf_base_type, nf_fname)
+            if str_eq(nf_ft, "") == 0 and str_eq(nf_ft, "unknown") == 0:
+                return nf_ft
+        return "unknown"
+
+    # Nested method call: resolve base type, then get method return type
+    if ntype == NODE_NESTED_METHOD:
+        nm_base: i64 = Memory.read_i64(node + 8)
+        nm_mname: str = Memory.read_i64(node + 16) as str
+        nm_base_type: str = infer_expr_type(nm_base)
+        if str_eq(nm_base_type, "") == 0 and str_eq(nm_base_type, "unknown") == 0:
+            nm_mangled: str = Str.concat(Str.concat(nm_base_type, "_"), nm_mname)
+            nm_rt: str = get_fun_ret_type(nm_mangled)
+            if str_eq(nm_rt, "unknown") == 0 and str_eq(nm_rt, "") == 0:
+                return nm_rt
+        return "unknown"
+
     if ntype == NODE_ARRAY_LIT or ntype == NODE_LIST_LIT:
         return "list"
 

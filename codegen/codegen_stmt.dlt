@@ -837,6 +837,8 @@ fun gen_statement(node: i64):
         gen_ns_static_method(node)
     elif nt == NODE_INST_METHOD:
         gen_instance_method_call(node)
+    elif nt == NODE_NESTED_METHOD:
+        gen_nested_method_call(node)
     elif nt == NODE_SUPER_METHOD:
         gen_super_method_call(node)
     elif nt == NODE_MATCH:

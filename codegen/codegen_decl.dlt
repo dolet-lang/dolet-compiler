@@ -116,8 +116,22 @@ fun gen_fun_def(node: i64):
         i = i + 1
 
     # Generate body
+    # Activate entry block buffer to hoist allocas
+    old_entry_active: i32 = g_entry_active
+    old_entry_count: i32 = g_entry_count
+    old_entry_insert_pos: i32 = g_entry_insert_pos
+    g_entry_active = 1
+    g_entry_count = 0
+    g_entry_insert_pos = g_out_count
+
     if body != 0:
         gen_block(body)
+
+    # Flush hoisted allocas into function entry block
+    flush_entry_allocas()
+    g_entry_active = old_entry_active
+    g_entry_count = old_entry_count
+    g_entry_insert_pos = old_entry_insert_pos
 
     # Add implicit return if no return at end
     if has_return == 0:
@@ -336,8 +350,22 @@ fun gen_method_def(struct_name: str, node: i64):
             arg_idx = arg_idx + 1
             i = i + 1
 
+    # Activate entry block buffer to hoist allocas
+    old_entry_active2: i32 = g_entry_active
+    old_entry_count2: i32 = g_entry_count
+    old_entry_insert_pos2: i32 = g_entry_insert_pos
+    g_entry_active = 1
+    g_entry_count = 0
+    g_entry_insert_pos = g_out_count
+
     if body != 0:
         gen_block(body)
+
+    # Flush hoisted allocas into method entry block
+    flush_entry_allocas()
+    g_entry_active = old_entry_active2
+    g_entry_count = old_entry_count2
+    g_entry_insert_pos = old_entry_insert_pos2
 
     if has_return == 0:
         if body == 0 or block_always_returns(body) == 0:

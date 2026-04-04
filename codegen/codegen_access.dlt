@@ -89,6 +89,145 @@ fun gen_self_field_access(node: i64) -> str:
     return val
 
 # ==========================================
+# Nested Field Access (e.g., state.Gamepad.bLeftTrigger)
+# ==========================================
+fun gen_nested_field_access(node: i64, expected: str) -> str:
+    base_node: i64 = Memory.read_i64(node + 8)
+    field_name: str = Memory.read_i64(node + 16) as str
+
+    # Build GEP chain: resolve base to a pointer (without final load)
+    base_ptr: str = gen_nested_field_ptr(base_node)
+
+    # Get type of the base expression
+    base_type: str = infer_expr_type(base_node)
+
+    # GEP into the sub-struct for the nested field
+    fidx2: i32 = get_field_index(base_type, field_name)
+    ftype2: str = get_field_type(base_type, field_name)
+    mt2: str = mlir_type(ftype2)
+
+    struct_mlir2: str = get_struct_mlir_type(base_type)
+    fp2: str = new_tmp()
+    emit_ind(Str.concat(Str.concat(Str.concat(fp2, " = llvm.getelementptr "), base_ptr), Str.concat(Str.concat("[0, ", Str.concat(Convert.i64_to_str(fidx2 as i64), "]")), Str.concat(" : (!llvm.ptr) -> !llvm.ptr, ", struct_mlir2))))
+
+    val2: str = emit_load(fp2, mt2)
+    return val2
+
+# Returns pointer to a struct field WITHOUT loading (for nested chain)
+fun gen_nested_field_ptr(node: i64) -> str:
+    nt2: i32 = nd_type(node)
+
+    if nt2 == NODE_FIELD_ACCESS:
+        obj_name2: str = Memory.read_i64(node + 8) as str
+        field2: str = Memory.read_i64(node + 16) as str
+        obj_type2: str = get_var_type(obj_name2)
+        obj_ptr2: str = gen_var_load(obj_name2, obj_type2)
+        fidx3: i32 = get_field_index(obj_type2, field2)
+        struct_mlir3: str = get_struct_mlir_type(obj_type2)
+        fp3: str = new_tmp()
+        emit_ind(Str.concat(Str.concat(Str.concat(fp3, " = llvm.getelementptr "), obj_ptr2), Str.concat(Str.concat("[0, ", Str.concat(Convert.i64_to_str(fidx3 as i64), "]")), Str.concat(" : (!llvm.ptr) -> !llvm.ptr, ", struct_mlir3))))
+        return fp3
+
+    if nt2 == NODE_NESTED_FIELD:
+        inner_base: i64 = Memory.read_i64(node + 8)
+        inner_field: str = Memory.read_i64(node + 16) as str
+        inner_ptr: str = gen_nested_field_ptr(inner_base)
+        inner_type: str = infer_expr_type(inner_base)
+        fidx4: i32 = get_field_index(inner_type, inner_field)
+        struct_mlir4: str = get_struct_mlir_type(inner_type)
+        fp4: str = new_tmp()
+        emit_ind(Str.concat(Str.concat(Str.concat(fp4, " = llvm.getelementptr "), inner_ptr), Str.concat(Str.concat("[0, ", Str.concat(Convert.i64_to_str(fidx4 as i64), "]")), Str.concat(" : (!llvm.ptr) -> !llvm.ptr, ", struct_mlir4))))
+        return fp4
+
+    if nt2 == NODE_SELF_FIELD:
+        sf2: str = Memory.read_i64(node + 8) as str
+        sf_type2: str = g_cur_method_struct
+        fidx5: i32 = get_field_index(sf_type2, sf2)
+        struct_mlir5: str = get_struct_mlir_type(sf_type2)
+        fp5: str = new_tmp()
+        emit_ind(Str.concat(Str.concat(Str.concat(fp5, " = llvm.getelementptr %self"), ""), Str.concat(Str.concat("[0, ", Str.concat(Convert.i64_to_str(fidx5 as i64), "]")), Str.concat(" : (!llvm.ptr) -> !llvm.ptr, ", struct_mlir5))))
+        return fp5
+
+    # Fallback: gen_expr and hope it returns a ptr
+    fb_type: str = infer_expr_type(node)
+    return gen_expr(node, fb_type)
+
+# ==========================================
+# Nested Method Call (e.g., self.field.method(args))
+# ==========================================
+fun gen_nested_method_call(node: i64) -> str:
+    base_node: i64 = Memory.read_i64(node + 8)
+    method_name: str = Memory.read_i64(node + 16) as str
+    args_list: i64 = Memory.read_i64(node + 24)
+
+    # Get the pointer to the nested struct field
+    base_ptr: str = gen_nested_field_ptr(base_node)
+
+    # Get the type of the nested struct
+    base_type: str = infer_expr_type(base_node)
+
+    # Build proxy NODE_INST_METHOD for the method call on the nested struct
+    # We use base_ptr as the self pointer and delegate to instance method logic
+    # Mangled name: base_type_method_name
+    mangled: str = Str.concat(Str.concat(base_type, "_"), method_name)
+
+    # Build arg string starting with the nested struct pointer as self
+    arg_str: str = base_ptr
+    type_str: str = "!llvm.ptr"
+
+    ac: i32 = 0
+    if args_list != 0:
+        ac = nl_count(args_list)
+
+    # Look up method for param types
+    method_node3: i64 = find_impl_method(base_type, method_name)
+    method_params3: i64 = 0
+    if method_node3 != 0:
+        method_params3 = Memory.read_i64(method_node3 + 16)
+
+    i: i32 = 0
+    while i < ac:
+        anode: i64 = nl_get(args_list, i)
+        at: str = infer_expr_type(anode)
+        if str_eq(at, "unknown") == 1:
+            at = "i64"
+
+        expected_pt3: str = ""
+        if method_params3 != 0:
+            param_idx3: i32 = i + 1
+            if param_idx3 < nl_count(method_params3):
+                mp_node3: i64 = nl_get(method_params3, param_idx3)
+                expected_pt3 = Memory.read_i64(mp_node3 + 16) as str
+
+        if str_eq(expected_pt3, "") == 0:
+            av: str = gen_expr(anode, expected_pt3)
+            amt: str = mlir_type(expected_pt3)
+            if str_eq(at, expected_pt3) == 0 and str_eq(at, "unknown") == 0:
+                av = implicit_cast(av, at, expected_pt3)
+            arg_str = Str.concat(arg_str, Str.concat(", ", av))
+            type_str = Str.concat(type_str, Str.concat(", ", amt))
+        else:
+            av2: str = gen_expr(anode, at)
+            amt2: str = mlir_type(at)
+            arg_str = Str.concat(arg_str, Str.concat(", ", av2))
+            type_str = Str.concat(type_str, Str.concat(", ", amt2))
+        i = i + 1
+
+    # Get return type
+    ret_type: str = get_fun_ret_type(mangled)
+    ret_mt: str = ""
+    if str_eq(ret_type, "unknown") == 0 and str_eq(ret_type, "") == 0 and str_eq(ret_type, "void") == 0:
+        ret_mt = mlir_type(ret_type)
+
+    if str_eq(ret_mt, "") == 1:
+        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat("llvm.call @", mangled), "("), arg_str), Str.concat(") : (", Str.concat(type_str, ") -> ()"))))
+        return ""
+    else:
+        tmp: str = new_tmp()
+        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(Str.concat(tmp, " = llvm.call @"), mangled), "("), arg_str), Str.concat(") : (", Str.concat(type_str, Str.concat(") -> ", ret_mt)))))
+        return tmp
+
+# ==========================================
 # Static Field Access (Struct.field)
 # ==========================================
 fun gen_static_field_access(node: i64) -> str:
@@ -559,8 +698,23 @@ fun gen_array_access(node: i64, expected: str) -> str:
 # We ignore the ns prefix since symbols are loaded into flat scope.
 # ==========================================
 fun gen_ns_fun_call(node: i64) -> str:
+    ns: str = Memory.read_i64(node + 8) as str
     fname: str = Memory.read_i64(node + 16) as str
     args_list: i64 = Memory.read_i64(node + 24)
+
+    # Check if 'ns' is actually a local/global variable with struct type
+    ns_var_type: str = get_var_type(ns)
+    if str_eq(ns_var_type, "unknown") == 0:
+        if is_struct_type(ns_var_type) == 1:
+            # Redirect to instance method call: ns.fname(args)
+            # Build a proxy NODE_INST_METHOD node (+8=obj, +16=method, +24=args)
+            proxy_im: i64 = Memory.malloc_zeroed(88)
+            Memory.write_i32(proxy_im, 88)
+            Memory.write_i64(proxy_im + 8, ns as i64)
+            Memory.write_i64(proxy_im + 16, fname as i64)
+            Memory.write_i64(proxy_im + 24, args_list)
+            return gen_instance_method_call(proxy_im)
+
     # Build a proxy node with NODE_FUN_CALL layout (+8=fname, +16=args)
     proxy: i64 = Memory.malloc_zeroed(64)
     Memory.write_i32(proxy, 61)              # NODE_FUN_CALL = 61
