@@ -1555,6 +1555,7 @@ fun main() -> i32:
         IOOps.io_println("  --keep-llvm        Keep intermediate .ll file")
         IOOps.io_println("  --no-runtime       Don't auto-import runtime libraries")
         IOOps.io_println("  --no-console       GUI mode (no console window)")
+        IOOps.io_println("  --version          Show compiler version")
         return 1
 
     # Parse arguments
@@ -1569,7 +1570,10 @@ fun main() -> i32:
     ai: i32 = 1
     while ai < argc:
         arg: str = Args.get(ai)
-        if str_eq(arg, "--no-runtime") == 1:
+        if str_eq(arg, "--version") == 1:
+            IOOps.io_println("Dolet Compiler v1.2.0-beta")
+            return 0
+        elif str_eq(arg, "--no-runtime") == 1:
             no_runtime = 1
         elif str_eq(arg, "--keep-mlir") == 1:
             keep_mlir = 1

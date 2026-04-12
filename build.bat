@@ -2,25 +2,58 @@
 setlocal enabledelayedexpansion
 
 echo ============================================
-echo  Dolet Compiler — Bootstrap Build
+echo  Dolet Compiler — Full Bootstrap Build
 echo ============================================
 echo.
 
 set "ROOT=%~dp0"
 set "BIN=%ROOT%bin"
-set "SRC=%ROOT%build\pipeline_build.dlt"
+set "BUILD=%ROOT%build"
+set "SRC=%BUILD%\pipeline_build.dlt"
 
 if not exist "%BIN%" mkdir "%BIN%"
 
-echo [1/1] Python bootstrap -^> doletc.exe
-python "%ROOT%bootstrap\doletc.py" "%SRC%" -o "%BIN%\doletc.exe" --platform windows
+:: Step 0: Concatenate sources into pipeline_build.dlt
+echo [0/3] Generating pipeline_build.dlt ...
+python "%ROOT%bootstrap\build.py" build
 if %errorlevel% neq 0 (
-    echo [FAILED] Build
+    echo [FAILED] Pipeline generation
     exit /b 1
 )
 echo.
 
+:: Step 1: doletc.exe -> doletc2.exe
+echo [1/3] doletc.exe -^> bin\doletc2.exe
+"%BIN%\doletc.exe" "%SRC%" -o "%BIN%\doletc2.exe"
+if %errorlevel% neq 0 (
+    echo [FAILED] Stage 1 compile
+    exit /b 1
+)
+echo.
+
+:: Step 2: doletc2.exe -> doletc3.exe
+echo [2/3] doletc2.exe -^> bin\doletc3.exe
+"%BIN%\doletc2.exe" "%SRC%" -o "%BIN%\doletc3.exe"
+if %errorlevel% neq 0 (
+    echo [FAILED] Stage 2 compile
+    exit /b 1
+)
+echo.
+
+:: Step 3: Promote doletc3 as the new doletc
+echo [3/3] Promoting doletc3.exe -^> doletc.exe
+copy /Y "%BIN%\doletc3.exe" "%BIN%\doletc.exe" >nul
+echo.
+
+:: Verify
+"%BIN%\doletc.exe" --version
+echo.
+
+:: Cleanup intermediates
+del "%BIN%\doletc2.exe" 2>nul
+del "%BIN%\doletc3.exe" 2>nul
+
 echo ============================================
-echo  BUILD COMPLETE
-echo  bin\doletc.exe  — compiled via bootstrap
+echo  BOOTSTRAP COMPLETE
+echo  bin\doletc.exe — fully self-compiled
 echo ============================================

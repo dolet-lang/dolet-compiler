@@ -1099,10 +1099,6 @@ fun mk_node_list(cap: i32) -> i64:
 
 fun nl_add(nl: i64, item: i64):
     count: i32 = Memory.read_i32(nl)
-    cap: i32 = Memory.read_i32(nl + 4)
-    if count >= cap:
-        IOOps.io_println(Str.concat("[FATAL] nl_add overflow: count=", Str.concat(Convert.i32_to_str(count), Str.concat(" cap=", Convert.i32_to_str(cap)))))
-        ExitProcess(1)
     off: i64 = 8 + ((count as i64) * 8)
     Memory.write_i64(nl + off, item)
     Memory.write_i32(nl, count + 1)
@@ -2378,21 +2374,24 @@ fun mk_is_not_null(value: i64) -> i64:
 fun isnotnull_value(n: i64) -> i64:
     return Memory.read_i64(n + 8)
 
-# AnnotDefNode: +8=name, +16=targets, +24=params, +32=effect_type, +40=effect_data, +48=composes, +56=exclusive, +64=emit_level, +72=emit_msg
+# AnnotDefNode: f0=name, f1=targets(str), f2=params(nl), f3=effect_type(str), f4=effect_data(str), f5=composes(nl), f6=exclusive(str), f7=emit_level(str), f8=emit_msg(str)
+# +8=name, +16=targets, +24=params, +32=effect_type, +40=effect_data, +48=composes, +56=exclusive, +64=emit_level, +72=emit_msg
 fun mk_annot_def(name: str, targets: str) -> i64:
     n: i64 = alloc_node(NODE_ANNOT_DEF)
     Memory.write_i64(n + 8, name as i64)
     Memory.write_i64(n + 16, targets as i64)
     return n
 
-# AnnotParamNode: +8=name, +16=ptype, +24=default_val, +32=is_optional, +40=valid_values
+# AnnotParamNode: f0=name, f1=ptype(str), f2=default_val(str), f3=is_optional(i64), f4=valid_values(str)
+# +8=name, +16=ptype, +24=default_val, +32=is_optional, +40=valid_values
 fun mk_annot_param(name: str, ptype: str) -> i64:
     n: i64 = alloc_node(NODE_ANNOT_PARAM)
     Memory.write_i64(n + 8, name as i64)
     Memory.write_i64(n + 16, ptype as i64)
     return n
 
-# AnnotUseNode: +8=name, +16=args(nl)
+# AnnotUseNode: f0=name, f1=args(nl of key=value pairs)
+# +8=name, +16=args
 fun mk_annot_use(name: str, args: i64) -> i64:
     n: i64 = alloc_node(NODE_ANNOT_USE)
     Memory.write_i64(n + 8, name as i64)
@@ -2420,6 +2419,8 @@ p_pos: i32 = 0
 
 # ==========================================
 # Module Name Registry
+# Tracks names registered via import so the parser
+# can produce namespace-qualified AST nodes.
 # ==========================================
 g_module_names: i64 = 0
 g_module_count: i32 = 0
@@ -2445,6 +2446,8 @@ fun is_module_name(name: str) -> i32:
 
 # ==========================================
 # Local Variable/Param Name Registry
+# Tracks declared variables and function params so
+# local names take priority over module names.
 # ==========================================
 g_local_names: i64 = 0
 g_local_count: i32 = 0
@@ -2863,7 +2866,7 @@ fun parse_primary() -> i64:
                         if p1 == 40 and p2 == 41:
                             has_parens = 1
                     if has_parens == 1:
-                        fn_name: str = str_from_range(expr_name, 0 as i64, elen - 2)
+                        fn_name: str = str_from_range(expr_name, 0, elen - 2)
                         empty_args: i64 = mk_node_list(0)
                         nl_add(parts, mk_fun_call(fn_name, empty_args, 0))
                     else:
@@ -2878,7 +2881,7 @@ fun parse_primary() -> i64:
                                 break
                             di = di + 1
                         if dot_pos > 0:
-                            obj_part: str = str_from_range(expr_name, 0 as i64, dot_pos)
+                            obj_part: str = str_from_range(expr_name, 0, dot_pos)
                             field_part: str = str_from_range(expr_name, dot_pos + 1, elen)
                             if str_eq(obj_part, "self") == 1:
                                 nl_add(parts, mk_self_field(field_part))
@@ -3015,6 +3018,7 @@ fun parse_dot_access(first: str) -> i64:
     # Namespace-qualified access: ns.func() or ns.Struct.method()
     # Local variables/params take priority over module names
     if is_module_name(first) == 1 and is_local_name(first) == 0:
+        # ns.func(args) or ns.Struct(args)
         if cur_kind() == TK_LPAREN:
             nargs: i64 = parse_arg_list()
             nfc: i8 = Memory.read_i8(member as i64)
@@ -3026,6 +3030,7 @@ fun parse_dot_access(first: str) -> i64:
             if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
                 return parse_chained_dot(ns_node)
             return ns_node
+        # ns.Struct.method(args) or ns.sub.something
         if cur_kind() == TK_DOT:
             eat(TK_DOT)
             third: str = cur_val()
@@ -3041,7 +3046,9 @@ fun parse_dot_access(first: str) -> i64:
                 if cur_kind() == TK_DOT or cur_kind() == TK_NEWLINE:
                     return parse_chained_dot(ns_node2)
                 return ns_node2
+            # ns.Struct.field — simple access
             return mk_ns_access(first, member)
+        # ns.symbol
         return mk_ns_access(first, member)
 
     # Static/instance method call: Name.method(args)
@@ -4208,18 +4215,13 @@ fun parse_struct_decl(is_abstract: i64) -> i64:
 
     return mk_struct_decl(name, fields, type_params, base_class, methods, is_abstract, 0, parents)
 
-# @transparent struct — parse normally then set flag=2 in stack_alloc field
 # ==========================================
-# Annotation Definition Parser
+# Annotation Definition
 # annot name:
 #     target: fun, struct
-#     param message: str
-#         default: "..."
+#     param msg: str
 #     effect: llvm
-#         attribute: "hot"
-#     emit: warning
-#     composes: inline, hot
-#     mutually_exclusive: noinline
+#         attribute: "noinline"
 # ==========================================
 fun parse_annot_def() -> i64:
     si: i32 = cur_indent()
@@ -4278,7 +4280,7 @@ fun parse_annot_def() -> i64:
     eat(TK_LPAREN)
     skip_newlines()
 
-    # Parse key: value fields inside Annot(...)
+    # Parse key = value fields inside Annot(...)
     while cur_kind() != TK_RPAREN and cur_kind() != TK_EOF:
         field_name: str = cur_val()
         advance()
@@ -4370,6 +4372,7 @@ fun parse_annot_def() -> i64:
     Memory.write_i64(node + 72, emit_msg as i64)
     return node
 
+# @transparent struct — parse normally then set flag=2 in stack_alloc field
 fun parse_struct_decl_transparent() -> i64:
     node: i64 = parse_struct_decl(0)
     # Set stack_alloc (offset +56) to 2 = transparent marker
@@ -4893,6 +4896,7 @@ fun parse_statement() -> i64:
         if cur_kind() == TK_FUN:
             return parse_fun_def(0)
         # Access modifier on struct field or other context — skip
+        # Let it fall through to re-parse as identifier
         while cur_kind() != TK_NEWLINE and cur_kind() != TK_EOF:
             advance()
         return 0
@@ -5125,44 +5129,42 @@ fun parse_statement() -> i64:
 
     # Identifier: var decl, assignment, function call, method call
     if k == TK_IDENT:
-        # Context-sensitive list/array/map declarations
-        # "list NAME : TYPE = [...]" — only when followed by another identifier
-        ident_v: str = cur_val()
-        if str_eq(ident_v, "list") == 1:
-            if peek_kind(1) == TK_IDENT:
-                advance()
-                lname: str = cur_val()
-                eat(TK_IDENT)
-                ltype: str = ""
-                if cur_kind() == TK_COLON:
-                    advance()
-                    ltype = parse_type_name()
-                eat(TK_ASSIGN)
-                lval: i64 = parse_expression()
-                return mk_list_decl(lname, lval, ltype, 0)
-        if str_eq(ident_v, "array") == 1:
-            if peek_kind(1) == TK_IDENT:
-                advance()
-                aname: str = cur_val()
-                eat(TK_IDENT)
-                atype: str = ""
-                if cur_kind() == TK_COLON:
-                    advance()
-                    atype = parse_type_name()
-                eat(TK_ASSIGN)
-                aval: i64 = parse_expression()
-                return mk_array_decl(aname, 0, atype, 0)
-        if str_eq(ident_v, "map") == 1:
-            if peek_kind(1) == TK_IDENT:
-                advance()
-                mname: str = cur_val()
-                eat(TK_IDENT)
-                eat(TK_ASSIGN)
-                mval: i64 = parse_expression()
-                return mk_map_decl(mname, 0, "", "", 0)
         # Check if it's a variable declaration: Name : type
         # or assignment, function call, etc.
         return parse_var_decl_ident()
+
+    # List/Array/Map declarations
+    if k == TK_LIST:
+        advance()
+        lname: str = cur_val()
+        eat(TK_IDENT)
+        ltype: str = ""
+        if cur_kind() == TK_COLON:
+            advance()
+            ltype = parse_type_name()
+        eat(TK_ASSIGN)
+        lval: i64 = parse_expression()
+        return mk_list_decl(lname, 0, ltype, 0)
+
+    if k == TK_ARRAY:
+        advance()
+        aname: str = cur_val()
+        eat(TK_IDENT)
+        atype: str = ""
+        if cur_kind() == TK_COLON:
+            advance()
+            atype = parse_type_name()
+        eat(TK_ASSIGN)
+        aval: i64 = parse_expression()
+        return mk_array_decl(aname, 0, atype, 0)
+
+    if k == TK_MAP:
+        advance()
+        mname: str = cur_val()
+        eat(TK_IDENT)
+        eat(TK_ASSIGN)
+        mval: i64 = parse_expression()
+        return mk_map_decl(mname, 0, "", "", 0)
 
     panic(@"Unknown statement: kind={k} val='{cur_val()}'")
     return 0
@@ -5190,6 +5192,38 @@ fun parse() -> i64:
 ##############################
 
 # ==========================================
+# String Utility Functions
+# ==========================================
+fun str_eq(a: str, b: str) -> i32:
+    la: i64 = Memory.strlen(a)
+    lb: i64 = Memory.strlen(b)
+    if la != lb:
+        return 0
+    i: i64 = 0
+    while i < la:
+        ca: i8 = Memory.read_i8((a as i64) + i)
+        cb: i8 = Memory.read_i8((b as i64) + i)
+        if ca != cb:
+            return 0
+        i = i + 1
+    return 1
+
+fun str_from_range(src: str, start: i64, end_pos: i64) -> str:
+    slen: i64 = end_pos - start
+    if slen <= 0:
+        return ""
+    buf: i64 = Memory.malloc_zeroed(slen + 1)
+    i: i64 = 0
+    while i < slen:
+        ch: i8 = Memory.read_i8((src as i64) + start + i)
+        Memory.write_i8(buf + i, ch)
+        i = i + 1
+    Memory.write_i8(buf + slen, 0)
+    return buf as str
+
+fun char_at(s: str, idx: i64) -> i8:
+    return Memory.read_i8((s as i64) + idx)
+
 fun panic(msg: str):
     IOOps.io_println(msg)
     ExitProcess(1)
@@ -5279,16 +5313,12 @@ fun init_ast_constants():
     NODE_FUN_PTR_TYPE = 143
     NODE_IS_NULL = 144
     NODE_IS_NOT_NULL = 145
-    NODE_MODULE_DECL = 160
-    NODE_EXPORT = 161
-    NODE_REQUIRES = 162
-    NODE_USE_MODULE = 163
-    NODE_ANNOT_DEF = 170
-    NODE_ANNOT_PARAM = 171
-    NODE_ANNOT_USE = 172
     NODE_PARAM = 150
     NODE_FIELD_VAL = 151
     NODE_MAP_ENTRY = 152
+    NODE_ANNOT_DEF = 170
+    NODE_ANNOT_PARAM = 171
+    NODE_ANNOT_USE = 172
     NODE_SIZE = 88
     IMPORT_FULL = 1
     IMPORT_FROM = 2
@@ -5299,7 +5329,7 @@ fun init_ast_constants():
 # ==========================================
 g_out: i64 = 0
 g_out_count: i32 = 0
-g_out_cap: i32 = 65536
+g_out_cap: i32 = 524288
 
 # Entry Block Buffer — for hoisting alloca instructions to function entry
 g_entry_buf: i64 = 0
@@ -5444,7 +5474,7 @@ g_str_labels: i64 = 0
 g_str_texts: i64 = 0
 g_str_lens: i64 = 0
 g_str_count: i32 = 0
-g_str_cap: i32 = 1024
+g_str_cap: i32 = 4096
 
 fun init_str_pool():
     g_str_cap = 4096
@@ -5480,9 +5510,6 @@ fun gen_string_const(text: str) -> str:
             return Memory.read_i64(g_str_labels + off) as str
         i = i + 1
     # Register new
-    if g_str_count >= g_str_cap:
-        IOOps.io_println("[ERROR] String pool overflow!")
-        return ""
     label: str = new_str_label()
     slen: i64 = escaped_byte_len(text) + 1
     off2: i64 = (g_str_count as i64) * 8
@@ -5512,7 +5539,7 @@ g_var_types: i64 = 0
 g_var_is_param: i64 = 0
 g_var_is_const: i64 = 0
 g_var_count: i32 = 0
-g_var_cap: i32 = 512
+g_var_cap: i32 = 2048
 
 fun init_var_registry():
     g_var_cap = 2048
@@ -5619,9 +5646,6 @@ fun register_fun_sig(name: str, ret_type: str):
     g_fun_sig_count = g_fun_sig_count + 1
 
 fun register_fun_sig_with_params(name: str, ret_type: str, param_types: str):
-    if g_fun_sig_count >= 8192:
-        IOOps.io_println("[FATAL] Function signature registry overflow!")
-        return
     off: i64 = (g_fun_sig_count as i64) * 8
     Memory.write_i64(g_fun_sig_names + off, name as i64)
     Memory.write_i64(g_fun_sig_ret + off, ret_type as i64)
@@ -5917,32 +5941,6 @@ fun is_global_var(name: str) -> i32:
         i = i + 1
     return 0
 
-# Global List Variables (list declarations at top level)
-g_global_list_names: i64 = 0
-g_global_list_nodes: i64 = 0
-g_global_list_count: i32 = 0
-
-fun init_global_lists():
-    g_global_list_names = Memory.malloc_zeroed(256 * 8)
-    g_global_list_nodes = Memory.malloc_zeroed(256 * 8)
-    g_global_list_count = 0
-
-fun register_global_list(name: str, node: i64):
-    off: i64 = (g_global_list_count as i64) * 8
-    Memory.write_i64(g_global_list_names + off, name as i64)
-    Memory.write_i64(g_global_list_nodes + off, node)
-    g_global_list_count = g_global_list_count + 1
-
-fun is_global_list(name: str) -> i32:
-    i: i32 = 0
-    while i < g_global_list_count:
-        off: i64 = (i as i64) * 8
-        gn: str = Memory.read_i64(g_global_list_names + off) as str
-        if str_eq(gn, name) == 1:
-            return 1
-        i = i + 1
-    return 0
-
 # ==========================================
 # Static Fields Tracking
 # ==========================================
@@ -5996,9 +5994,6 @@ fun init_impl_registry():
     g_impl_count = 0
 
 fun register_impl_method(sname: str, mname: str, mnode: i64):
-    if g_impl_count >= 2048:
-        IOOps.io_println("[FATAL] Impl method registry overflow!")
-        return
     off: i64 = (g_impl_count as i64) * 8
     Memory.write_i64(g_impl_struct + off, sname as i64)
     Memory.write_i64(g_impl_method_name + off, mname as i64)
@@ -6705,6 +6700,8 @@ fun get_generic_params(name: str) -> i64:
 
 # ==========================================
 # Module Symbol Registry
+# Maps (module_name, symbol_name) for qualified access
+# kind: 0=fun, 1=struct, 2=var
 # ==========================================
 g_mod_sym_module: i64 = 0
 g_mod_sym_name: i64 = 0
@@ -6754,7 +6751,6 @@ fun init_all_registries():
     init_alias_registry()
     init_enum_registry()
     init_global_vars()
-    init_global_lists()
     init_static_fields()
     init_impl_registry()
     init_overload_registry()
@@ -6769,413 +6765,32 @@ fun init_all_registries():
     gen_string_const("true")
     gen_string_const("false")
 
-##############################
-# Tree Shaking — Dead Code Elimination
-# Opt-in via --tree-shake flag
-##############################
+# ==========================================
+# Function Deduplication (prevent duplicate MLIR emissions)
+# ==========================================
+g_emitted_fn_names: i64 = 0
+g_emitted_fn_count: i32 = 0
 
-# Reachable symbols tracking
-g_ts_names: i64 = 0
-g_ts_kinds: i64 = 0
-g_ts_processed: i64 = 0
-g_ts_count: i32 = 0
-g_ts_cap: i32 = 2048
-g_tree_shake_enabled: i32 = 0
+fun init_emitted_fns():
+    g_emitted_fn_names = Memory.malloc_zeroed(4096 * 8)
+    g_emitted_fn_count = 0
 
-fun init_tree_shaking():
-    g_ts_cap = 2048
-    g_ts_names = Memory.malloc_zeroed((g_ts_cap as i64) * 8)
-    g_ts_kinds = Memory.malloc_zeroed((g_ts_cap as i64) * 4)
-    g_ts_processed = Memory.malloc_zeroed((g_ts_cap as i64) * 4)
-    g_ts_count = 0
-
-fun ts_mark_reachable(name: str, kind: i32):
-    if (name as i64) == 0:
-        return
-    if Memory.strlen(name) == 0:
-        return
+fun is_fn_emitted(name: str) -> i32:
     i: i32 = 0
-    while i < g_ts_count:
-        off8: i64 = (i as i64) * 8
-        existing: str = Memory.read_i64(g_ts_names + off8) as str
-        if str_eq(existing, name) == 1:
-            return
-        i = i + 1
-    if g_ts_count < g_ts_cap:
-        off8: i64 = (g_ts_count as i64) * 8
-        off4: i64 = (g_ts_count as i64) * 4
-        Memory.write_i64(g_ts_names + off8, name as i64)
-        Memory.write_i32(g_ts_kinds + off4, kind)
-        Memory.write_i32(g_ts_processed + off4, 0)
-        g_ts_count = g_ts_count + 1
-
-fun ts_mark_fun(name: str):
-    if is_struct_type(name) == 1:
-        ts_mark_struct(name)
-        return
-    ts_mark_reachable(name, 0)
-
-fun ts_mark_struct(name: str):
-    ts_mark_reachable(name, 1)
-    parent: str = get_parent_struct(name)
-    if Memory.strlen(parent) > 0:
-        ts_mark_struct(parent)
-
-fun ts_is_reachable(name: str) -> i32:
-    if g_tree_shake_enabled == 0:
-        return 1
-    i: i32 = 0
-    while i < g_ts_count:
-        off8: i64 = (i as i64) * 8
-        existing: str = Memory.read_i64(g_ts_names + off8) as str
+    while i < g_emitted_fn_count:
+        off: i64 = (i as i64) * 8
+        existing: str = Memory.read_i64(g_emitted_fn_names + off) as str
         if str_eq(existing, name) == 1:
             return 1
         i = i + 1
     return 0
 
-fun ts_is_extern_fun_reachable(name: str) -> i32:
-    if g_tree_shake_enabled == 0:
-        return 1
-    i: i32 = 0
-    while i < g_ts_count:
-        off8: i64 = (i as i64) * 8
-        existing: str = Memory.read_i64(g_ts_names + off8) as str
-        if str_eq(existing, name) == 1:
-            return 1
-        i = i + 1
-    return 0
-
-fun ts_mark_method_by_name(method_name: str):
-    i: i32 = 0
-    while i < g_impl_count:
-        off8: i64 = (i as i64) * 8
-        mname: str = Memory.read_i64(g_impl_method_name + off8) as str
-        if (mname as i64) != 0:
-            if str_eq(mname, method_name) == 1:
-                sname: str = Memory.read_i64(g_impl_struct + off8) as str
-                ts_mark_struct(sname)
-        i = i + 1
-
-fun ts_walk_list(nlist: i64):
-    if nlist == 0:
+fun mark_fn_emitted(name: str):
+    if g_emitted_fn_count >= 4096:
         return
-    c: i32 = nl_count(nlist)
-    i: i32 = 0
-    while i < c:
-        ts_walk_node(nl_get(nlist, i))
-        i = i + 1
-
-fun ts_walk_node(node: i64):
-    if node == 0:
-        return
-    nt: i32 = nd_type(node)
-
-    if nt == NODE_FUN_CALL:
-        fname: str = Memory.read_i64(node + 8) as str
-        ts_mark_fun(fname)
-        ts_walk_list(Memory.read_i64(node + 16))
-        return
-    if nt == NODE_STATIC_METHOD:
-        sname: str = Memory.read_i64(node + 8) as str
-        ts_mark_struct(sname)
-        ts_walk_list(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_INST_METHOD:
-        mname: str = Memory.read_i64(node + 16) as str
-        ts_mark_method_by_name(mname)
-        ts_walk_list(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_NS_FUN_CALL:
-        fname2: str = Memory.read_i64(node + 16) as str
-        ts_mark_fun(fname2)
-        ts_walk_list(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_NS_STATIC_METHOD:
-        sname2: str = Memory.read_i64(node + 16) as str
-        ts_mark_struct(sname2)
-        ts_walk_list(Memory.read_i64(node + 32))
-        return
-    if nt == NODE_STRUCT_INST:
-        sname3: str = Memory.read_i64(node + 8) as str
-        ts_mark_struct(sname3)
-        fvl: i64 = Memory.read_i64(node + 16)
-        if fvl != 0:
-            fvc: i32 = nl_count(fvl)
-            fi: i32 = 0
-            while fi < fvc:
-                fv: i64 = nl_get(fvl, fi)
-                ts_walk_node(Memory.read_i64(fv + 16))
-                fi = fi + 1
-        return
-    if nt == NODE_NS_STRUCT_INST:
-        sname4: str = Memory.read_i64(node + 16) as str
-        ts_mark_struct(sname4)
-        fvl2: i64 = Memory.read_i64(node + 24)
-        if fvl2 != 0:
-            fvc2: i32 = nl_count(fvl2)
-            fi2: i32 = 0
-            while fi2 < fvc2:
-                fv2: i64 = nl_get(fvl2, fi2)
-                ts_walk_node(Memory.read_i64(fv2 + 16))
-                fi2 = fi2 + 1
-        return
-    if nt == NODE_FUN_REF:
-        fname3: str = Memory.read_i64(node + 8) as str
-        ts_mark_fun(fname3)
-        return
-    if nt == NODE_SUPER_METHOD:
-        ts_walk_list(Memory.read_i64(node + 16))
-        return
-    if nt == NODE_BUILTIN_CALL:
-        ts_walk_list(Memory.read_i64(node + 16))
-        return
-    if nt == NODE_ENUM_ACCESS:
-        ename: str = Memory.read_i64(node + 8) as str
-        ts_mark_reachable(ename, 2)
-        return
-    if nt == NODE_VAR_DECL:
-        vtype: str = Memory.read_i64(node + 8) as str
-        if (vtype as i64) != 0:
-            if Memory.strlen(vtype) > 0:
-                if is_struct_type(vtype) == 1:
-                    ts_mark_struct(vtype)
-        ts_walk_node(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_ASSIGN:
-        ts_walk_node(Memory.read_i64(node + 16))
-        return
-    if nt == NODE_FIELD_ASSIGN:
-        ts_walk_node(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_STATIC_FIELD_ASSIGN:
-        sname5: str = Memory.read_i64(node + 8) as str
-        if (sname5 as i64) != 0:
-            if is_struct_type(sname5) == 1:
-                ts_mark_struct(sname5)
-        ts_walk_node(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_STATIC_FIELD:
-        sname6: str = Memory.read_i64(node + 8) as str
-        if (sname6 as i64) != 0:
-            if is_struct_type(sname6) == 1:
-                ts_mark_struct(sname6)
-        return
-    if nt == NODE_BINARY_OP or nt == NODE_COMPARISON or nt == NODE_LOGICAL_OP:
-        ts_walk_node(Memory.read_i64(node + 16))
-        ts_walk_node(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_UNARY_OP:
-        ts_walk_node(Memory.read_i64(node + 16))
-        return
-    if nt == NODE_CAST:
-        ts_walk_node(Memory.read_i64(node + 8))
-        return
-    if nt == NODE_PAREN:
-        ts_walk_node(Memory.read_i64(node + 8))
-        return
-    if nt == NODE_TERNARY:
-        ts_walk_node(Memory.read_i64(node + 8))
-        ts_walk_node(Memory.read_i64(node + 16))
-        ts_walk_node(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_RETURN:
-        ts_walk_node(Memory.read_i64(node + 8))
-        return
-    if nt == NODE_IF:
-        ts_walk_node(Memory.read_i64(node + 8))
-        ts_walk_list(Memory.read_i64(node + 16))
-        ts_walk_list(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_WHILE:
-        ts_walk_node(Memory.read_i64(node + 8))
-        ts_walk_list(Memory.read_i64(node + 16))
-        return
-    if nt == NODE_FOR:
-        ts_walk_node(Memory.read_i64(node + 16))
-        ts_walk_node(Memory.read_i64(node + 24))
-        ts_walk_list(Memory.read_i64(node + 32))
-        return
-    if nt == NODE_FOR_EACH:
-        ts_walk_node(Memory.read_i64(node + 32))
-        ts_walk_list(Memory.read_i64(node + 40))
-        return
-    if nt == NODE_BLOCK:
-        ts_walk_list(Memory.read_i64(node + 8))
-        return
-    if nt == NODE_MATCH:
-        ts_walk_node(Memory.read_i64(node + 8))
-        ts_walk_list(Memory.read_i64(node + 16))
-        ts_walk_list(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_CASE:
-        ts_walk_list(Memory.read_i64(node + 16))
-        return
-    if nt == NODE_ARRAY_LIT or nt == NODE_LIST_LIT:
-        ts_walk_list(Memory.read_i64(node + 8))
-        return
-    if nt == NODE_ARRAY_ACCESS:
-        ts_walk_node(Memory.read_i64(node + 16))
-        return
-    if nt == NODE_LIST_METHOD:
-        ts_walk_list(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_FSTRING:
-        ts_walk_list(Memory.read_i64(node + 8))
-        return
-    if nt == NODE_STR_CONCAT:
-        ts_walk_node(Memory.read_i64(node + 8))
-        ts_walk_node(Memory.read_i64(node + 16))
-        return
-    if nt == NODE_FIELD_ACCESS:
-        return
-    if nt == NODE_NESTED_FIELD:
-        ts_walk_node(Memory.read_i64(node + 8))
-        return
-    if nt == NODE_NESTED_METHOD:
-        ts_walk_node(Memory.read_i64(node + 8))
-        ts_walk_list(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_CONTEXT_BLOCK:
-        ts_walk_node(Memory.read_i64(node + 8))
-        ts_walk_list(Memory.read_i64(node + 24))
-        return
-    if nt == NODE_IS_NULL or nt == NODE_IS_NOT_NULL:
-        ts_walk_node(Memory.read_i64(node + 8))
-        return
-    if nt == NODE_FIELD_VAL:
-        ts_walk_node(Memory.read_i64(node + 16))
-        return
-    if nt == NODE_MAP_ENTRY:
-        ts_walk_node(Memory.read_i64(node + 8))
-        ts_walk_node(Memory.read_i64(node + 16))
-        return
-    if nt == NODE_MAP_LIT:
-        ts_walk_list(Memory.read_i64(node + 8))
-        return
-    if nt == NODE_STRUCT_FIELD:
-        ts_walk_node(Memory.read_i64(node + 24))
-        return
-    return
-
-fun ts_seed(ast: i64):
-    sc: i32 = nl_count(ast)
-    i: i32 = 0
-    while i < sc:
-        node: i64 = nl_get(ast, i)
-        nt: i32 = nd_type(node)
-        if nt != NODE_FUN_DEF and nt != NODE_STRUCT_DECL and nt != NODE_ENUM_DECL and nt != NODE_IMPL_BLOCK and nt != NODE_EXTEND_BLOCK and nt != NODE_EXTERN_BLOCK and nt != NODE_TRAIT_DECL and nt != NODE_TYPE_ALIAS and nt != NODE_IMPORT and nt != NODE_MODULE_DECL and nt != NODE_EXPORT and nt != NODE_REQUIRES and nt != NODE_USE_MODULE:
-            ts_walk_node(node)
-        i = i + 1
-    ts_mark_fun("main")
-
-fun ts_process_function(ast: i64, fname: str):
-    sc: i32 = nl_count(ast)
-    i: i32 = 0
-    while i < sc:
-        node: i64 = nl_get(ast, i)
-        nt: i32 = nd_type(node)
-        if nt == NODE_FUN_DEF:
-            n_name: str = Memory.read_i64(node + 8) as str
-            if str_eq(n_name, fname) == 1:
-                ts_walk_list(Memory.read_i64(node + 32))
-                return
-        i = i + 1
-
-fun ts_process_struct(ast: i64, sname: str):
-    sc: i32 = nl_count(ast)
-    i: i32 = 0
-    while i < sc:
-        node: i64 = nl_get(ast, i)
-        nt: i32 = nd_type(node)
-        if nt == NODE_STRUCT_DECL:
-            n_name: str = Memory.read_i64(node + 8) as str
-            if str_eq(n_name, sname) == 1:
-                ts_walk_list(Memory.read_i64(node + 40))
-                base: str = Memory.read_i64(node + 32) as str
-                if (base as i64) != 0:
-                    if Memory.strlen(base) > 0:
-                        ts_mark_struct(base)
-        elif nt == NODE_IMPL_BLOCK:
-            n_name2: str = Memory.read_i64(node + 8) as str
-            if str_eq(n_name2, sname) == 1:
-                mlist: i64 = Memory.read_i64(node + 16)
-                if mlist != 0:
-                    mc: i32 = nl_count(mlist)
-                    mi: i32 = 0
-                    while mi < mc:
-                        mnode: i64 = nl_get(mlist, mi)
-                        ts_walk_list(Memory.read_i64(mnode + 32))
-                        mi = mi + 1
-        elif nt == NODE_EXTEND_BLOCK:
-            n_name3: str = Memory.read_i64(node + 8) as str
-            if str_eq(n_name3, sname) == 1:
-                mlist2: i64 = Memory.read_i64(node + 16)
-                if mlist2 != 0:
-                    mc2: i32 = nl_count(mlist2)
-                    mi2: i32 = 0
-                    while mi2 < mc2:
-                        mnode2: i64 = nl_get(mlist2, mi2)
-                        ts_walk_list(Memory.read_i64(mnode2 + 32))
-                        mi2 = mi2 + 1
-        i = i + 1
-
-fun ts_process_all(ast: i64):
-    changed: i32 = 1
-    while changed == 1:
-        changed = 0
-        i: i32 = 0
-        while i < g_ts_count:
-            off4: i64 = (i as i64) * 4
-            if Memory.read_i32(g_ts_processed + off4) == 0:
-                Memory.write_i32(g_ts_processed + off4, 1)
-                changed = 1
-                off8: i64 = (i as i64) * 8
-                name: str = Memory.read_i64(g_ts_names + off8) as str
-                kind: i32 = Memory.read_i32(g_ts_kinds + off4)
-                if kind == 0:
-                    ts_process_function(ast, name)
-                elif kind == 1:
-                    ts_process_struct(ast, name)
-            i = i + 1
-
-fun run_tree_shaking(ast: i64):
-    if g_tree_shake_enabled == 0:
-        return
-    # Mark codegen-internal calls (emitted by codegen, not visible in AST)
-    ts_mark_struct("Memory")
-    ts_mark_struct("Str")
-    ts_mark_struct("Convert")
-    ts_mark_reachable("Str_concat", 0)
-    ts_mark_reachable("dsl_str_concat", 0)
-    ts_mark_reachable("strcmp", 0)
-    ts_mark_reachable("Memory_malloc", 0)
-    ts_mark_reachable("Memory_malloc_zeroed", 0)
-    ts_mark_reachable("Convert_i32_to_str", 0)
-    ts_mark_reachable("Convert_i64_to_str", 0)
-    ts_mark_reachable("Convert_f64_to_str", 0)
-    ts_mark_reachable("Convert_bool_to_str", 0)
-    ts_mark_reachable("dsl_hash_i32", 0)
-    ts_mark_reachable("dsl_hash_i64", 0)
-    ts_mark_reachable("dsl_hash_string", 0)
-    ts_seed(ast)
-    ts_process_all(ast)
-    IOOps.io_println(Str.concat("[tree-shake] reachable: ", Convert.i64_to_str(g_ts_count as i64)))
-
-fun ts_extern_block_has_reachable(node: i64) -> i32:
-    if g_tree_shake_enabled == 0:
-        return 1
-    flist: i64 = Memory.read_i64(node + 16)
-    if flist == 0:
-        return 0
-    fc: i32 = nl_count(flist)
-    fi: i32 = 0
-    while fi < fc:
-        fnode: i64 = nl_get(flist, fi)
-        fname: str = Memory.read_i64(fnode + 8) as str
-        if ts_is_extern_fun_reachable(fname) == 1:
-            return 1
-        fi = fi + 1
-    return 0
+    off: i64 = (g_emitted_fn_count as i64) * 8
+    Memory.write_i64(g_emitted_fn_names + off, name as i64)
+    g_emitted_fn_count = g_emitted_fn_count + 1
 
 ##############################
 # MLIR Codegen Types
@@ -7479,28 +7094,6 @@ fun infer_expr_type(node: i64) -> str:
                 return fa_ft
         return "unknown"
 
-    if ntype == NODE_NESTED_FIELD:
-        nf_base: i64 = Memory.read_i64(node + 8)
-        nf_fname: str = Memory.read_i64(node + 16) as str
-        nf_base_type: str = infer_expr_type(nf_base)
-        if str_eq(nf_base_type, "") == 0 and str_eq(nf_base_type, "unknown") == 0:
-            nf_ft: str = get_field_type(nf_base_type, nf_fname)
-            if str_eq(nf_ft, "") == 0 and str_eq(nf_ft, "unknown") == 0:
-                return nf_ft
-        return "unknown"
-
-    # Nested method call: resolve base type, then get method return type
-    if ntype == NODE_NESTED_METHOD:
-        nm_base: i64 = Memory.read_i64(node + 8)
-        nm_mname: str = Memory.read_i64(node + 16) as str
-        nm_base_type: str = infer_expr_type(nm_base)
-        if str_eq(nm_base_type, "") == 0 and str_eq(nm_base_type, "unknown") == 0:
-            nm_mangled: str = Str.concat(Str.concat(nm_base_type, "_"), nm_mname)
-            nm_rt: str = get_fun_ret_type(nm_mangled)
-            if str_eq(nm_rt, "unknown") == 0 and str_eq(nm_rt, "") == 0:
-                return nm_rt
-        return "unknown"
-
     if ntype == NODE_SELF_FIELD:
         sf_field: str = Memory.read_i64(node + 8) as str
         sf_struct: str = g_cur_method_struct
@@ -7525,7 +7118,7 @@ fun infer_expr_type(node: i64) -> str:
             imb_i: i64 = 0
             while imb_i < imb_len:
                 if Memory.read_i8((im_obj_type as i64) + imb_i) == 91:
-                    im_base = str_from_range(im_obj_type, 0 as i64, imb_i)
+                    im_base = str_from_range(im_obj_type, 0, imb_i)
                     imb_i = imb_len
                 imb_i = imb_i + 1
             im_mangled: str = Str.concat(Str.concat(im_base, "_"), im_mname)
@@ -7547,6 +7140,29 @@ fun infer_expr_type(node: i64) -> str:
                 return nfc_rt
         # Normal namespace function: just look up function name
         return get_fun_ret_type(nfc_fname)
+
+    # Nested field access: resolve base type, then get field type
+    if ntype == NODE_NESTED_FIELD:
+        nf_base: i64 = Memory.read_i64(node + 8)
+        nf_fname: str = Memory.read_i64(node + 16) as str
+        nf_base_type: str = infer_expr_type(nf_base)
+        if str_eq(nf_base_type, "") == 0 and str_eq(nf_base_type, "unknown") == 0:
+            nf_ft: str = get_field_type(nf_base_type, nf_fname)
+            if str_eq(nf_ft, "") == 0 and str_eq(nf_ft, "unknown") == 0:
+                return nf_ft
+        return "unknown"
+
+    # Nested method call: resolve base type, then get method return type
+    if ntype == NODE_NESTED_METHOD:
+        nm_base: i64 = Memory.read_i64(node + 8)
+        nm_mname: str = Memory.read_i64(node + 16) as str
+        nm_base_type: str = infer_expr_type(nm_base)
+        if str_eq(nm_base_type, "") == 0 and str_eq(nm_base_type, "unknown") == 0:
+            nm_mangled: str = Str.concat(Str.concat(nm_base_type, "_"), nm_mname)
+            nm_rt: str = get_fun_ret_type(nm_mangled)
+            if str_eq(nm_rt, "unknown") == 0 and str_eq(nm_rt, "") == 0:
+                return nm_rt
+        return "unknown"
 
     if ntype == NODE_ARRAY_LIT or ntype == NODE_LIST_LIT:
         return "list"
@@ -7579,6 +7195,8 @@ fun infer_expr_type(node: i64) -> str:
         return "f64"
 
     return "unknown"
+
+# ==========================================
 # Struct Field Index / Size
 # ==========================================
 fun get_field_index(struct_name: str, field_name: str) -> i32:
@@ -7806,6 +7424,10 @@ fun gen_expr(node: i64, expected: str) -> str:
     if nt == NODE_FIELD_ACCESS:
         return gen_field_access(node)
 
+    # Self field access
+    if nt == NODE_SELF_FIELD:
+        return gen_self_field_access(node)
+
     # Nested field access (e.g., state.Gamepad.bLeftTrigger)
     if nt == NODE_NESTED_FIELD:
         return gen_nested_field_access(node, expected)
@@ -7813,10 +7435,6 @@ fun gen_expr(node: i64, expected: str) -> str:
     # Nested method call (e.g., self.field.method(args))
     if nt == NODE_NESTED_METHOD:
         return gen_nested_method_call(node)
-
-    # Self field access
-    if nt == NODE_SELF_FIELD:
-        return gen_self_field_access(node)
 
     # Self reference
     if nt == NODE_SELF:
@@ -8867,12 +8485,12 @@ fun gen_field_assignment(node: i64):
     # Access control enforcement for field assignment
     acc: str = get_field_access(obj_type, field_name)
     if str_eq(acc, "private") == 1:
-        in_struct3: i32 = 0
+        in_struct: i32 = 0
         if (g_cur_method_struct as i64) != 0:
             if Memory.strlen(g_cur_method_struct) > 0:
                 if str_eq(g_cur_method_struct, obj_type) == 1:
-                    in_struct3 = 1
-        if in_struct3 == 0:
+                    in_struct = 1
+        if in_struct == 0:
             IOOps.io_println(Str.concat("[error] Cannot assign to private field: ", field_name))
             return
     elif str_eq(acc, "protected") == 1:
@@ -9493,32 +9111,6 @@ fun copy_struct_local(src_ptr: str, sname: str) -> str:
         fi = fi + 1
     return dest
 
-# List declaration statement handler
-# NODE_LIST_DECL: +8=name, +16=init_value (array lit node), +24=element_type, +32=is_const
-fun gen_list_decl_stmt(node: i64):
-    name: str = Memory.read_i64(node + 8) as str
-    init_val: i64 = Memory.read_i64(node + 16)
-    etype: str = Memory.read_i64(node + 24) as str
-
-    if is_global_list(name) == 1 and g_in_function == 0:
-        # Global list: generate init value and store to global
-        if init_val != 0:
-            lval: str = gen_expr(init_val, "list")
-            ga: str = emit_addr_of(name)
-            emit_store(lval, ga, "!llvm.ptr")
-        return
-
-    # Local list: allocate alloca and store
-    alloc: str = emit_alloca("!llvm.ptr")
-    alloc_name: str = str_from_range(alloc, 1, Memory.strlen(alloc))
-    add_variable(name, alloc_name, "list", 0, 0)
-    if init_val != 0:
-        lval2: str = gen_expr(init_val, "list")
-        emit_store(lval2, alloc, "!llvm.ptr")
-    else:
-        z: str = emit_zero_ptr()
-        emit_store(z, alloc, "!llvm.ptr")
-
 fun gen_var_decl(node: i64):
     vtype: str = Memory.read_i64(node + 8) as str
     name: str = Memory.read_i64(node + 16) as str
@@ -9650,7 +9242,7 @@ fun gen_statement(node: i64):
     elif nt == NODE_ARRAY_DECL:
         gen_var_decl(node)
     elif nt == NODE_LIST_DECL:
-        gen_list_decl_stmt(node)
+        gen_var_decl(node)
     elif nt == NODE_MAP_DECL:
         gen_var_decl(node)
     elif nt == NODE_ANNOT_DEF:
@@ -10274,6 +9866,24 @@ fun gen_field_access(node: i64) -> str:
     return val
 
 # ==========================================
+# Self Field Access (self.field in methods)
+# ==========================================
+fun gen_self_field_access(node: i64) -> str:
+    field_name: str = Memory.read_i64(node + 8) as str
+    sname: str = g_cur_method_struct
+
+    fidx: i32 = get_field_index(sname, field_name)
+    ftype: str = get_field_type(sname, field_name)
+    mt: str = mlir_type(ftype)
+
+    struct_mlir: str = get_struct_mlir_type(sname)
+    fp: str = new_tmp()
+    emit_ind(Str.concat(Str.concat(fp, " = llvm.getelementptr %self[0, "), Str.concat(Str.concat(Convert.i64_to_str(fidx as i64), "] : (!llvm.ptr) -> !llvm.ptr, "), struct_mlir)))
+
+    val: str = emit_load(fp, mt)
+    return val
+
+# ==========================================
 # Nested Field Access (e.g., state.Gamepad.bLeftTrigger)
 # ==========================================
 fun gen_nested_field_access(node: i64, expected: str) -> str:
@@ -10351,6 +9961,8 @@ fun gen_nested_method_call(node: i64) -> str:
     # Get the type of the nested struct
     base_type: str = infer_expr_type(base_node)
 
+    # Build proxy NODE_INST_METHOD for the method call on the nested struct
+    # We use base_ptr as the self pointer and delegate to instance method logic
     # Mangled name: base_type_method_name
     mangled: str = Str.concat(Str.concat(base_type, "_"), method_name)
 
@@ -10409,24 +10021,6 @@ fun gen_nested_method_call(node: i64) -> str:
         tmp: str = new_tmp()
         emit_ind(Str.concat(Str.concat(Str.concat(Str.concat(Str.concat(tmp, " = llvm.call @"), mangled), "("), arg_str), Str.concat(") : (", Str.concat(type_str, Str.concat(") -> ", ret_mt)))))
         return tmp
-
-# ==========================================
-# Self Field Access (self.field in methods)
-# ==========================================
-fun gen_self_field_access(node: i64) -> str:
-    field_name: str = Memory.read_i64(node + 8) as str
-    sname: str = g_cur_method_struct
-
-    fidx: i32 = get_field_index(sname, field_name)
-    ftype: str = get_field_type(sname, field_name)
-    mt: str = mlir_type(ftype)
-
-    struct_mlir: str = get_struct_mlir_type(sname)
-    fp: str = new_tmp()
-    emit_ind(Str.concat(Str.concat(fp, " = llvm.getelementptr %self[0, "), Str.concat(Str.concat(Convert.i64_to_str(fidx as i64), "] : (!llvm.ptr) -> !llvm.ptr, "), struct_mlir)))
-
-    val: str = emit_load(fp, mt)
-    return val
 
 # ==========================================
 # Static Field Access (Struct.field)
@@ -10544,13 +10138,6 @@ fun gen_fun_call(node: i64) -> str:
         ati = ati + 1
 
     call_name: str = resolve_overload(fname, arg_types_str)
-
-    # Check for annotation warnings at call site
-    fn_flags: i32 = get_fn_annot_flags(call_name)
-    if fn_flags == 1:
-        # deprecated
-        depr_msg: str = get_fn_annot_msg(call_name)
-        IOOps.io_println(Str.concat("[WARNING] @deprecated: ", Str.concat(fname, Str.concat(" - ", depr_msg))))
 
     # Build argument list
     arg_str: str = ""
@@ -10686,46 +10273,6 @@ fun gen_static_method_call(node: i64) -> str:
         return tmp
 
 # ==========================================
-# Namespaced Function Call: ns.func(args)
-# ==========================================
-fun gen_ns_fun_call(node: i64) -> str:
-    ns: str = Memory.read_i64(node + 8) as str
-    fname: str = Memory.read_i64(node + 16) as str
-    args_list: i64 = Memory.read_i64(node + 24)
-
-    # Check if 'ns' is actually a local/global variable with struct type
-    ns_var_type: str = get_var_type(ns)
-    if str_eq(ns_var_type, "unknown") == 0:
-        if is_struct_type(ns_var_type) == 1:
-            # Redirect to instance method call: ns.fname(args)
-            proxy_im: i64 = Memory.malloc_zeroed(88)
-            Memory.write_i32(proxy_im, 88)
-            Memory.write_i64(proxy_im + 8, ns as i64)
-            Memory.write_i64(proxy_im + 16, fname as i64)
-            Memory.write_i64(proxy_im + 24, args_list)
-            return gen_instance_method_call(proxy_im)
-
-    proxy: i64 = Memory.malloc_zeroed(64)
-    Memory.write_i32(proxy, 61)
-    Memory.write_i64(proxy + 8, fname as i64)
-    Memory.write_i64(proxy + 16, args_list)
-    return gen_fun_call(proxy)
-
-# ==========================================
-# Namespaced Static Method: ns.Struct.method(args)
-# ==========================================
-fun gen_ns_static_method(node: i64) -> str:
-    sname: str = Memory.read_i64(node + 16) as str
-    mname: str = Memory.read_i64(node + 24) as str
-    args_list: i64 = Memory.read_i64(node + 32)
-    proxy: i64 = Memory.malloc_zeroed(64)
-    Memory.write_i32(proxy, 85)
-    Memory.write_i64(proxy + 8, sname as i64)
-    Memory.write_i64(proxy + 16, mname as i64)
-    Memory.write_i64(proxy + 24, args_list)
-    return gen_static_method_call(proxy)
-
-# ==========================================
 # Instance Method Call (obj.method(...))
 # ==========================================
 fun gen_instance_method_call(node: i64) -> str:
@@ -10749,7 +10296,7 @@ fun gen_instance_method_call(node: i64) -> str:
     bt_i: i64 = 0
     while bt_i < bt_len:
         if Memory.read_i8((obj_type as i64) + bt_i) == 91:
-            base_type = str_from_range(obj_type, 0 as i64, bt_i)
+            base_type = str_from_range(obj_type, 0, bt_i)
             bt_i = bt_len
         bt_i = bt_i + 1
 
@@ -10810,15 +10357,9 @@ fun gen_instance_method_call(node: i64) -> str:
 
         if str_eq(expected_pt2, "") == 0:
             av: str = gen_expr(anode, expected_pt2)
+            amt: str = mlir_type(expected_pt2)
             if str_eq(at, expected_pt2) == 0 and str_eq(at, "unknown") == 0:
-                # Only implicit cast for compatible types (e.g., i32->i64), not across categories
-                if is_int_type(at) == 1 and is_int_type(expected_pt2) == 1:
-                    av = implicit_cast(av, at, expected_pt2)
-                    at = expected_pt2
-                elif is_float_type(at) == 1 and is_float_type(expected_pt2) == 1:
-                    av = implicit_cast(av, at, expected_pt2)
-                    at = expected_pt2
-            amt: str = mlir_type(at)
+                av = implicit_cast(av, at, expected_pt2)
             arg_str = Str.concat(arg_str, Str.concat(", ", av))
             type_str = Str.concat(type_str, Str.concat(", ", amt))
         else:
@@ -10946,6 +10487,537 @@ fun gen_array_access(node: i64, expected: str) -> str:
     val: str = emit_load(ep, mt)
     return val
 
+# ==========================================
+# Namespaced Function Call: ns.func(args)
+# NODE_NS_FUN_CALL layout: +8=ns, +16=fname, +24=args, +32=type_args
+# We ignore the ns prefix since symbols are loaded into flat scope.
+# ==========================================
+fun gen_ns_fun_call(node: i64) -> str:
+    ns: str = Memory.read_i64(node + 8) as str
+    fname: str = Memory.read_i64(node + 16) as str
+    args_list: i64 = Memory.read_i64(node + 24)
+
+    # Check if 'ns' is actually a local/global variable with struct type
+    ns_var_type: str = get_var_type(ns)
+    if str_eq(ns_var_type, "unknown") == 0:
+        if is_struct_type(ns_var_type) == 1:
+            # Redirect to instance method call: ns.fname(args)
+            # Build a proxy NODE_INST_METHOD node (+8=obj, +16=method, +24=args)
+            proxy_im: i64 = Memory.malloc_zeroed(88)
+            Memory.write_i32(proxy_im, 88)
+            Memory.write_i64(proxy_im + 8, ns as i64)
+            Memory.write_i64(proxy_im + 16, fname as i64)
+            Memory.write_i64(proxy_im + 24, args_list)
+            return gen_instance_method_call(proxy_im)
+
+    # Build a proxy node with NODE_FUN_CALL layout (+8=fname, +16=args)
+    proxy: i64 = Memory.malloc_zeroed(64)
+    Memory.write_i32(proxy, 61)              # NODE_FUN_CALL = 61
+    Memory.write_i64(proxy + 8, fname as i64)
+    Memory.write_i64(proxy + 16, args_list)
+    return gen_fun_call(proxy)
+
+# ==========================================
+# Namespaced Static Method: ns.Struct.method(args)
+# NODE_NS_STATIC_METHOD layout: +8=ns, +16=sname, +24=method, +32=args
+# ==========================================
+fun gen_ns_static_method(node: i64) -> str:
+    sname: str = Memory.read_i64(node + 16) as str
+    mname: str = Memory.read_i64(node + 24) as str
+    args_list: i64 = Memory.read_i64(node + 32)
+    # Build a proxy node with NODE_STATIC_METHOD layout (+8=sname, +16=mname, +24=args)
+    proxy: i64 = Memory.malloc_zeroed(64)
+    Memory.write_i32(proxy, 85)              # NODE_STATIC_METHOD = 85
+    Memory.write_i64(proxy + 8, sname as i64)
+    Memory.write_i64(proxy + 16, mname as i64)
+    Memory.write_i64(proxy + 24, args_list)
+    return gen_static_method_call(proxy)
+
+# ==========================================
+# Tree Shaking — Dead Code Elimination
+# Opt-in via --tree-shake flag
+# ==========================================
+
+# Reachable symbols tracking
+g_ts_names: i64 = 0
+g_ts_kinds: i64 = 0
+g_ts_processed: i64 = 0
+g_ts_count: i32 = 0
+g_ts_cap: i32 = 2048
+g_tree_shake_enabled: i32 = 0
+
+fun init_tree_shaking():
+    g_ts_cap = 2048
+    g_ts_names = Memory.malloc_zeroed((g_ts_cap as i64) * 8)
+    g_ts_kinds = Memory.malloc_zeroed((g_ts_cap as i64) * 4)
+    g_ts_processed = Memory.malloc_zeroed((g_ts_cap as i64) * 4)
+    g_ts_count = 0
+
+fun ts_mark_reachable(name: str, kind: i32):
+    if (name as i64) == 0:
+        return
+    if Memory.strlen(name) == 0:
+        return
+    # Deduplicate
+    i: i32 = 0
+    while i < g_ts_count:
+        off8: i64 = (i as i64) * 8
+        existing: str = Memory.read_i64(g_ts_names + off8) as str
+        if str_eq(existing, name) == 1:
+            return
+        i = i + 1
+    # Append
+    if g_ts_count < g_ts_cap:
+        off8: i64 = (g_ts_count as i64) * 8
+        off4: i64 = (g_ts_count as i64) * 4
+        Memory.write_i64(g_ts_names + off8, name as i64)
+        Memory.write_i32(g_ts_kinds + off4, kind)
+        Memory.write_i32(g_ts_processed + off4, 0)
+        g_ts_count = g_ts_count + 1
+
+fun ts_mark_fun(name: str):
+    # If it's actually a struct type, mark as struct instead
+    if is_struct_type(name) == 1:
+        ts_mark_struct(name)
+        return
+    ts_mark_reachable(name, 0)
+
+fun ts_mark_struct(name: str):
+    ts_mark_reachable(name, 1)
+    # Also mark parent struct if inheritance
+    parent: str = get_parent_struct(name)
+    if Memory.strlen(parent) > 0:
+        ts_mark_struct(parent)
+
+fun ts_is_reachable(name: str) -> i32:
+    if g_tree_shake_enabled == 0:
+        return 1
+    i: i32 = 0
+    while i < g_ts_count:
+        off8: i64 = (i as i64) * 8
+        existing: str = Memory.read_i64(g_ts_names + off8) as str
+        if str_eq(existing, name) == 1:
+            return 1
+        i = i + 1
+    return 0
+
+fun ts_is_extern_fun_reachable(name: str) -> i32:
+    if g_tree_shake_enabled == 0:
+        return 1
+    # Extern funs are marked as kind=0 (fun)
+    i: i32 = 0
+    while i < g_ts_count:
+        off8: i64 = (i as i64) * 8
+        existing: str = Memory.read_i64(g_ts_names + off8) as str
+        if str_eq(existing, name) == 1:
+            return 1
+        i = i + 1
+    return 0
+
+# Mark all structs that have a method with this name (conservative)
+fun ts_mark_method_by_name(method_name: str):
+    i: i32 = 0
+    while i < g_impl_count:
+        off8: i64 = (i as i64) * 8
+        mname: str = Memory.read_i64(g_impl_method_name + off8) as str
+        if (mname as i64) != 0:
+            if str_eq(mname, method_name) == 1:
+                sname: str = Memory.read_i64(g_impl_struct + off8) as str
+                ts_mark_struct(sname)
+        i = i + 1
+
+# ==========================================
+# AST Walker — marks reachable symbols
+# ==========================================
+fun ts_walk_list(nlist: i64):
+    if nlist == 0:
+        return
+    c: i32 = nl_count(nlist)
+    i: i32 = 0
+    while i < c:
+        ts_walk_node(nl_get(nlist, i))
+        i = i + 1
+
+fun ts_walk_node(node: i64):
+    if node == 0:
+        return
+    nt: i32 = nd_type(node)
+
+    # ---- Call sites ----
+    if nt == NODE_FUN_CALL:
+        fname: str = Memory.read_i64(node + 8) as str
+        ts_mark_fun(fname)
+        ts_walk_list(Memory.read_i64(node + 16))
+        return
+
+    if nt == NODE_STATIC_METHOD:
+        sname: str = Memory.read_i64(node + 8) as str
+        ts_mark_struct(sname)
+        ts_walk_list(Memory.read_i64(node + 24))
+        return
+
+    if nt == NODE_INST_METHOD:
+        mname: str = Memory.read_i64(node + 16) as str
+        ts_mark_method_by_name(mname)
+        ts_walk_list(Memory.read_i64(node + 24))
+        return
+
+    if nt == NODE_NS_FUN_CALL:
+        fname2: str = Memory.read_i64(node + 16) as str
+        ts_mark_fun(fname2)
+        ts_walk_list(Memory.read_i64(node + 24))
+        return
+
+    if nt == NODE_NS_STATIC_METHOD:
+        sname2: str = Memory.read_i64(node + 16) as str
+        ts_mark_struct(sname2)
+        ts_walk_list(Memory.read_i64(node + 32))
+        return
+
+    if nt == NODE_STRUCT_INST:
+        sname3: str = Memory.read_i64(node + 8) as str
+        ts_mark_struct(sname3)
+        # Walk field values
+        fvl: i64 = Memory.read_i64(node + 16)
+        if fvl != 0:
+            fvc: i32 = nl_count(fvl)
+            fi: i32 = 0
+            while fi < fvc:
+                fv: i64 = nl_get(fvl, fi)
+                ts_walk_node(Memory.read_i64(fv + 16))
+                fi = fi + 1
+        return
+
+    if nt == NODE_NS_STRUCT_INST:
+        sname4: str = Memory.read_i64(node + 16) as str
+        ts_mark_struct(sname4)
+        fvl2: i64 = Memory.read_i64(node + 24)
+        if fvl2 != 0:
+            fvc2: i32 = nl_count(fvl2)
+            fi2: i32 = 0
+            while fi2 < fvc2:
+                fv2: i64 = nl_get(fvl2, fi2)
+                ts_walk_node(Memory.read_i64(fv2 + 16))
+                fi2 = fi2 + 1
+        return
+
+    if nt == NODE_FUN_REF:
+        fname3: str = Memory.read_i64(node + 8) as str
+        ts_mark_fun(fname3)
+        return
+
+    if nt == NODE_SUPER_METHOD:
+        ts_walk_list(Memory.read_i64(node + 16))
+        return
+
+    if nt == NODE_BUILTIN_CALL:
+        ts_walk_list(Memory.read_i64(node + 16))
+        return
+
+    if nt == NODE_ENUM_ACCESS:
+        ename: str = Memory.read_i64(node + 8) as str
+        ts_mark_reachable(ename, 2)
+        return
+
+    # ---- Expressions ----
+    if nt == NODE_VAR_DECL:
+        # Check if type is a struct
+        vtype: str = Memory.read_i64(node + 8) as str
+        if (vtype as i64) != 0:
+            if Memory.strlen(vtype) > 0:
+                if is_struct_type(vtype) == 1:
+                    ts_mark_struct(vtype)
+        ts_walk_node(Memory.read_i64(node + 24))
+        return
+
+    if nt == NODE_ASSIGN:
+        ts_walk_node(Memory.read_i64(node + 16))
+        return
+
+    if nt == NODE_FIELD_ASSIGN:
+        ts_walk_node(Memory.read_i64(node + 24))
+        return
+
+    if nt == NODE_STATIC_FIELD_ASSIGN:
+        sname5: str = Memory.read_i64(node + 8) as str
+        if (sname5 as i64) != 0:
+            if is_struct_type(sname5) == 1:
+                ts_mark_struct(sname5)
+        ts_walk_node(Memory.read_i64(node + 24))
+        return
+
+    if nt == NODE_STATIC_FIELD:
+        sname6: str = Memory.read_i64(node + 8) as str
+        if (sname6 as i64) != 0:
+            if is_struct_type(sname6) == 1:
+                ts_mark_struct(sname6)
+        return
+
+    if nt == NODE_BINARY_OP or nt == NODE_COMPARISON or nt == NODE_LOGICAL_OP:
+        ts_walk_node(Memory.read_i64(node + 16))
+        ts_walk_node(Memory.read_i64(node + 24))
+        return
+
+    if nt == NODE_UNARY_OP:
+        ts_walk_node(Memory.read_i64(node + 16))
+        return
+
+    if nt == NODE_CAST:
+        ts_walk_node(Memory.read_i64(node + 8))
+        return
+
+    if nt == NODE_PAREN:
+        ts_walk_node(Memory.read_i64(node + 8))
+        return
+
+    if nt == NODE_TERNARY:
+        ts_walk_node(Memory.read_i64(node + 8))
+        ts_walk_node(Memory.read_i64(node + 16))
+        ts_walk_node(Memory.read_i64(node + 24))
+        return
+
+    if nt == NODE_RETURN:
+        ts_walk_node(Memory.read_i64(node + 8))
+        return
+
+    # ---- Control flow ----
+    if nt == NODE_IF:
+        ts_walk_node(Memory.read_i64(node + 8))
+        ts_walk_list(Memory.read_i64(node + 16))
+        ts_walk_list(Memory.read_i64(node + 24))
+        return
+
+    if nt == NODE_WHILE:
+        ts_walk_node(Memory.read_i64(node + 8))
+        ts_walk_list(Memory.read_i64(node + 16))
+        return
+
+    if nt == NODE_FOR:
+        ts_walk_node(Memory.read_i64(node + 16))
+        ts_walk_node(Memory.read_i64(node + 24))
+        ts_walk_list(Memory.read_i64(node + 32))
+        return
+
+    if nt == NODE_FOR_EACH:
+        ts_walk_node(Memory.read_i64(node + 32))
+        ts_walk_list(Memory.read_i64(node + 40))
+        return
+
+    if nt == NODE_BLOCK:
+        ts_walk_list(Memory.read_i64(node + 8))
+        return
+
+    if nt == NODE_MATCH:
+        ts_walk_node(Memory.read_i64(node + 8))
+        ts_walk_list(Memory.read_i64(node + 16))
+        ts_walk_list(Memory.read_i64(node + 24))
+        return
+
+    if nt == NODE_CASE:
+        ts_walk_list(Memory.read_i64(node + 16))
+        return
+
+    # ---- Collections ----
+    if nt == NODE_ARRAY_LIT or nt == NODE_LIST_LIT:
+        ts_walk_list(Memory.read_i64(node + 8))
+        return
+
+    if nt == NODE_ARRAY_ACCESS:
+        ts_walk_node(Memory.read_i64(node + 16))
+        return
+
+    if nt == NODE_LIST_METHOD:
+        ts_walk_list(Memory.read_i64(node + 24))
+        return
+
+    # ---- String ops ----
+    if nt == NODE_FSTRING:
+        ts_walk_list(Memory.read_i64(node + 8))
+        return
+
+    if nt == NODE_STR_CONCAT:
+        ts_walk_node(Memory.read_i64(node + 8))
+        ts_walk_node(Memory.read_i64(node + 16))
+        return
+
+    if nt == NODE_FIELD_ACCESS:
+        return
+
+    if nt == NODE_NESTED_FIELD:
+        ts_walk_node(Memory.read_i64(node + 8))
+        return
+
+    if nt == NODE_NESTED_METHOD:
+        ts_walk_node(Memory.read_i64(node + 8))
+        ts_walk_list(Memory.read_i64(node + 24))
+        return
+
+    if nt == NODE_CONTEXT_BLOCK:
+        ts_walk_node(Memory.read_i64(node + 8))
+        ts_walk_list(Memory.read_i64(node + 24))
+        return
+
+    if nt == NODE_IS_NULL or nt == NODE_IS_NOT_NULL:
+        ts_walk_node(Memory.read_i64(node + 8))
+        return
+
+    if nt == NODE_FIELD_VAL:
+        ts_walk_node(Memory.read_i64(node + 16))
+        return
+
+    if nt == NODE_MAP_ENTRY:
+        ts_walk_node(Memory.read_i64(node + 8))
+        ts_walk_node(Memory.read_i64(node + 16))
+        return
+
+    if nt == NODE_MAP_LIT:
+        ts_walk_list(Memory.read_i64(node + 8))
+        return
+
+    if nt == NODE_STRUCT_FIELD:
+        ts_walk_node(Memory.read_i64(node + 24))
+        return
+
+    # Literals and leaves — nothing to walk
+    return
+
+# ==========================================
+# Seed: walk top-level statements + mark main
+# ==========================================
+fun ts_seed(ast: i64):
+    sc: i32 = nl_count(ast)
+    i: i32 = 0
+    while i < sc:
+        node: i64 = nl_get(ast, i)
+        nt: i32 = nd_type(node)
+        # Walk non-declaration top-level statements
+        if nt != NODE_FUN_DEF and nt != NODE_STRUCT_DECL and nt != NODE_ENUM_DECL and nt != NODE_IMPL_BLOCK and nt != NODE_EXTEND_BLOCK and nt != NODE_EXTERN_BLOCK and nt != NODE_TRAIT_DECL and nt != NODE_TYPE_ALIAS and nt != NODE_IMPORT and nt != NODE_MODULE_DECL and nt != NODE_EXPORT and nt != NODE_REQUIRES and nt != NODE_USE_MODULE:
+            ts_walk_node(node)
+        i = i + 1
+    # Mark main() as reachable
+    ts_mark_fun("main")
+
+# ==========================================
+# Process: walk bodies of reachable symbols
+# ==========================================
+fun ts_process_function(ast: i64, fname: str):
+    sc: i32 = nl_count(ast)
+    i: i32 = 0
+    while i < sc:
+        node: i64 = nl_get(ast, i)
+        nt: i32 = nd_type(node)
+        if nt == NODE_FUN_DEF:
+            n_name: str = Memory.read_i64(node + 8) as str
+            if str_eq(n_name, fname) == 1:
+                # Walk function body
+                ts_walk_list(Memory.read_i64(node + 32))
+                return
+        i = i + 1
+
+fun ts_process_struct(ast: i64, sname: str):
+    sc: i32 = nl_count(ast)
+    i: i32 = 0
+    while i < sc:
+        node: i64 = nl_get(ast, i)
+        nt: i32 = nd_type(node)
+        if nt == NODE_STRUCT_DECL:
+            n_name: str = Memory.read_i64(node + 8) as str
+            if str_eq(n_name, sname) == 1:
+                # Walk inline methods body
+                ts_walk_list(Memory.read_i64(node + 40))
+                # Mark parent struct if any
+                base: str = Memory.read_i64(node + 32) as str
+                if (base as i64) != 0:
+                    if Memory.strlen(base) > 0:
+                        ts_mark_struct(base)
+        elif nt == NODE_IMPL_BLOCK:
+            n_name2: str = Memory.read_i64(node + 8) as str
+            if str_eq(n_name2, sname) == 1:
+                # Walk all impl methods
+                mlist: i64 = Memory.read_i64(node + 16)
+                if mlist != 0:
+                    mc: i32 = nl_count(mlist)
+                    mi: i32 = 0
+                    while mi < mc:
+                        mnode: i64 = nl_get(mlist, mi)
+                        ts_walk_list(Memory.read_i64(mnode + 32))
+                        mi = mi + 1
+        elif nt == NODE_EXTEND_BLOCK:
+            n_name3: str = Memory.read_i64(node + 8) as str
+            if str_eq(n_name3, sname) == 1:
+                # Walk all extend methods
+                mlist2: i64 = Memory.read_i64(node + 16)
+                if mlist2 != 0:
+                    mc2: i32 = nl_count(mlist2)
+                    mi2: i32 = 0
+                    while mi2 < mc2:
+                        mnode2: i64 = nl_get(mlist2, mi2)
+                        ts_walk_list(Memory.read_i64(mnode2 + 32))
+                        mi2 = mi2 + 1
+        i = i + 1
+
+fun ts_process_all(ast: i64):
+    changed: i32 = 1
+    while changed == 1:
+        changed = 0
+        i: i32 = 0
+        while i < g_ts_count:
+            off4: i64 = (i as i64) * 4
+            if Memory.read_i32(g_ts_processed + off4) == 0:
+                Memory.write_i32(g_ts_processed + off4, 1)
+                changed = 1
+                off8: i64 = (i as i64) * 8
+                name: str = Memory.read_i64(g_ts_names + off8) as str
+                kind: i32 = Memory.read_i32(g_ts_kinds + off4)
+                if kind == 0:
+                    ts_process_function(ast, name)
+                elif kind == 1:
+                    ts_process_struct(ast, name)
+            i = i + 1
+
+# ==========================================
+# Entry point
+# ==========================================
+fun run_tree_shaking(ast: i64):
+    if g_tree_shake_enabled == 0:
+        return
+    # Mark codegen-internal calls (emitted by codegen, not visible in AST)
+    ts_mark_struct("Memory")
+    ts_mark_struct("Str")
+    ts_mark_struct("Convert")
+    ts_mark_reachable("Str_concat", 0)
+    ts_mark_reachable("dsl_str_concat", 0)
+    ts_mark_reachable("strcmp", 0)
+    ts_mark_reachable("Memory_malloc", 0)
+    ts_mark_reachable("Memory_malloc_zeroed", 0)
+    ts_mark_reachable("Convert_i32_to_str", 0)
+    ts_mark_reachable("Convert_i64_to_str", 0)
+    ts_mark_reachable("Convert_f64_to_str", 0)
+    ts_mark_reachable("Convert_bool_to_str", 0)
+    ts_mark_reachable("dsl_hash_i32", 0)
+    ts_mark_reachable("dsl_hash_i64", 0)
+    ts_mark_reachable("dsl_hash_string", 0)
+    ts_seed(ast)
+    ts_process_all(ast)
+    IOOps.io_println(Str.concat("[tree-shake] reachable: ", Convert.i64_to_str(g_ts_count as i64)))
+
+# Check if extern block has any reachable functions
+fun ts_extern_block_has_reachable(node: i64) -> i32:
+    if g_tree_shake_enabled == 0:
+        return 1
+    flist: i64 = Memory.read_i64(node + 16)
+    if flist == 0:
+        return 0
+    fc: i32 = nl_count(flist)
+    fi: i32 = 0
+    while fi < fc:
+        fnode: i64 = nl_get(flist, fi)
+        fname: str = Memory.read_i64(fnode + 8) as str
+        if ts_is_extern_fun_reachable(fname) == 1:
+            return 1
+        fi = fi + 1
+    return 0
+
 ##############################
 # MLIR Codegen Main
 # generate(), statement dispatch, runtime, main function
@@ -11052,24 +11124,6 @@ fun gen_string_constants():
         i = i + 1
     emit_blank()
 
-g_str_emitted_count: i32 = 0
-
-# Emit string constants that were added after the initial gen_string_constants pass
-fun gen_late_string_constants():
-    if g_str_count <= g_str_emitted_count:
-        return
-    i: i32 = g_str_emitted_count
-    while i < g_str_count:
-        off8: i64 = (i as i64) * 8
-        off4: i64 = (i as i64) * 4
-        label: str = Memory.read_i64(g_str_labels + off8) as str
-        text: str = Memory.read_i64(g_str_texts + off8) as str
-        slen: i32 = Memory.read_i32(g_str_lens + off4)
-        escaped: str = escape_mlir_string(text)
-        emit_ind(Str.concat(Str.concat(Str.concat(Str.concat("llvm.mlir.global internal constant ", label), "(\""), escaped), Str.concat(Str.concat("\\00\") {addr_space = 0 : i32} : !llvm.array<", Convert.i64_to_str(slen as i64)), " x i8>")))
-        i = i + 1
-    emit_blank()
-
 # ==========================================
 # Collect Phase: scan AST and register types
 # ==========================================
@@ -11141,7 +11195,6 @@ fun collect_declarations(ast: i64):
     vname2: str = ""
     aname: str = ""
     atarget: str = ""
-    # Static field filtering variables (hoisted)
     total_fc: i32 = 0
     inst_fields: i64 = 0
     sfi: i32 = 0
@@ -11269,7 +11322,6 @@ fun collect_declarations(ast: i64):
                     mangled = Str.concat(Str.concat(isname, "_"), mname)
                     m_params = Memory.read_i64(mnode + 16)
                     m_pt = build_param_types_str_no_self(m_params)
-                    mangled = register_overload(mangled, m_pt)
                     register_fun_sig_with_params(mangled, mret, m_pt)
                     register_impl_method(isname, mname, mnode)
                     j2 = j2 + 1
@@ -11314,11 +11366,6 @@ fun collect_declarations(ast: i64):
         if nt == NODE_VAR_DECL:
             vname2 = Memory.read_i64(node + 16) as str
             register_global_var(vname2, node)
-
-        # List declarations — treated as ptr globals
-        if nt == NODE_LIST_DECL:
-            vname2 = Memory.read_i64(node + 8) as str
-            register_global_list(vname2, node)
 
         # Type alias
         if nt == NODE_TYPE_ALIAS:
@@ -11514,56 +11561,28 @@ fun gen_global_var_decls():
     emit_blank()
 
 # ==========================================
-# Generate Global List Declarations (list vars as !llvm.ptr globals)
-# ==========================================
-fun gen_global_list_decls():
-    if g_global_list_count == 0:
-        return
-    emit_ind("// Global list variable declarations")
-    i: i32 = 0
-    while i < g_global_list_count:
-        off: i64 = (i as i64) * 8
-        lname: str = Memory.read_i64(g_global_list_names + off) as str
-        add_variable(lname, lname, "list", 2, 0)
-        emit_ind(Str.concat(Str.concat("llvm.mlir.global internal @", lname), " () {addr_space = 0 : i32} : !llvm.ptr {"))
-        emit_ind("  %0 = llvm.mlir.zero : !llvm.ptr")
-        emit_ind("  llvm.return %0 : !llvm.ptr")
-        emit_ind("}")
-        i = i + 1
-    emit_blank()
-
-# ==========================================
 # Generate Struct Static Field Declarations
 # ==========================================
 fun gen_static_field_decls():
     if g_static_field_count == 0:
         return
     emit_ind("// Struct static field declarations")
-    # Hoist variables to avoid alloca-in-loop
     i: i32 = 0
-    off: i64 = 0
-    sf_name: str = ""
-    sf_type: str = ""
-    sf_def: i64 = 0
-    mt: str = ""
-    def_int_val: str = "0"
-    def_float_val: str = "0.0"
-    def_nt: i32 = 0
     while i < g_static_field_count:
-        off = (i as i64) * 8
-        sf_name = Memory.read_i64(g_sf_names + off) as str
-        sf_type = Memory.read_i64(g_sf_types + off) as str
-        sf_def = Memory.read_i64(g_sf_defaults + off)
-        mt = mlir_type(sf_type)
+        off: i64 = (i as i64) * 8
+        sf_name: str = Memory.read_i64(g_sf_names + off) as str
+        sf_type: str = Memory.read_i64(g_sf_types + off) as str
+        sf_def: i64 = Memory.read_i64(g_sf_defaults + off)
+        mt: str = mlir_type(sf_type)
         add_variable(sf_name, sf_name, sf_type, 2, 0)
         emit_ind(Str.concat(Str.concat(Str.concat("llvm.mlir.global internal @", sf_name), " () {addr_space = 0 : i32} : "), Str.concat(mt, " {")))
         # Check for non-zero default literal values
-        def_int_val = "0"
-        def_float_val = "0.0"
+        def_int_val: str = "0"
+        def_float_val: str = "0.0"
         if sf_def != 0:
-            def_nt = nd_type(sf_def)
+            def_nt: i32 = nd_type(sf_def)
             if def_nt == NODE_INT_LIT:
-                def_int_val = Convert.i64_to_str(Memory.read_i64(sf_def + 8))
+                def_int_val = Memory.read_i64(sf_def + 8) as str
             elif def_nt == NODE_FLOAT_LIT:
                 def_float_val = Memory.read_i64(sf_def + 8) as str
         if is_string_type(sf_type) == 1:
@@ -11583,33 +11602,6 @@ fun gen_static_field_decls():
     emit_blank()
 
 # ==========================================
-# Function Deduplication (prevent duplicate MLIR emissions)
-# ==========================================
-g_emitted_fn_names: i64 = 0
-g_emitted_fn_count: i32 = 0
-
-fun init_emitted_fns():
-    g_emitted_fn_names = Memory.malloc_zeroed(4096 * 8)
-    g_emitted_fn_count = 0
-
-fun is_fn_emitted(name: str) -> i32:
-    i: i32 = 0
-    while i < g_emitted_fn_count:
-        off: i64 = (i as i64) * 8
-        existing: str = Memory.read_i64(g_emitted_fn_names + off) as str
-        if str_eq(existing, name) == 1:
-            return 1
-        i = i + 1
-    return 0
-
-fun mark_fn_emitted(name: str):
-    if g_emitted_fn_count >= 4096:
-        return
-    off: i64 = (g_emitted_fn_count as i64) * 8
-    Memory.write_i64(g_emitted_fn_names + off, name as i64)
-    g_emitted_fn_count = g_emitted_fn_count + 1
-
-# ==========================================
 # Generate Functions
 # ==========================================
 fun gen_functions(ast: i64):
@@ -11619,9 +11611,11 @@ fun gen_functions(ast: i64):
         node: i64 = nl_get(ast, i)
         nt: i32 = nd_type(node)
 
+        IOOps.io_println(Str.concat(Str.concat("[gen_fn] node ", Convert.i64_to_str(i as i64)), Str.concat(" type=", Convert.i64_to_str(nt as i64))))
         if nt == NODE_EXTERN_BLOCK:
             if ts_extern_block_has_reachable(node) == 1:
                 gen_extern_block(node)
+                IOOps.io_println("[gen_fn] extern done")
         elif nt == NODE_STRUCT_DECL:
             sdbg: str = Memory.read_i64(node + 8) as str
             # Skip @transparent structs — they have no MLIR representation
@@ -11674,6 +11668,8 @@ fun gen_main_body(ast: i64):
             i = i + 1
         elif nt == NODE_IMPORT:
             i = i + 1
+        elif nt == NODE_ANNOT_DEF:
+            i = i + 1
         else:
             # Top-level statement — generate in main
             gen_statement(node)
@@ -11721,8 +11717,8 @@ fun generate(ast: i64) -> str:
     indent_inc()
 
     # String constants
+    IOOps.io_println("[gen] emitting string constants")
     gen_string_constants()
-    g_str_emitted_count = g_str_count
 
     # Platform-specific helpers (e.g., _fltused, __chkstk) are now in
     # library/sys/<platform>/runtime_helpers.obj — linked externally, not emitted here.
@@ -11733,13 +11729,11 @@ fun generate(ast: i64) -> str:
     # Global variable declarations
     gen_global_var_decls()
 
-    # Global list declarations (list variables at top level)
-    gen_global_list_decls()
-
     # Struct static field declarations
     gen_static_field_decls()
 
     # User-defined functions
+    IOOps.io_println("[gen] emitting functions")
     gen_functions(ast)
 
     # Main function (if user didn't define one)
@@ -11759,14 +11753,10 @@ fun generate(ast: i64) -> str:
         indent_dec()
         emit_ind("}")
 
-    # Emit any string constants added during codegen
-    gen_late_string_constants()
-
     indent_dec()
     emit("}")
 
     # Join all output lines — O(n) bulk copy instead of O(n²) concat
-    # First pass: compute total length
     total_len: i64 = 0
     i: i32 = 0
     while i < g_out_count:
@@ -11774,7 +11764,6 @@ fun generate(ast: i64) -> str:
         if i > 0:
             total_len = total_len + 1
         i = i + 1
-    # Second pass: copy into pre-allocated buffer
     buf: i64 = Memory.malloc(total_len + 1)
     pos: i64 = 0
     i = 0
@@ -11903,10 +11892,6 @@ fun init_tokenizer_constants():
     TK_LIST = 112
     TK_MAP = 113
     TK_ARRAY = 114
-    TK_IMM = 115
-    TK_MODULE = 116
-    TK_EXPORT = 117
-    TK_REQUIRES = 118
     TK_ANNOT = 135
 
 fun init_tokenizer_buffers():
@@ -11934,14 +11919,13 @@ fun init_pipeline():
 # Reads .dlt file, tokenizes, parses, generates MLIR, writes .mlir file
 # Uses Windows API directly (kernel32 auto-included)
 ##############################
-
 """
    ██████╗  ██████╗ ██╗     ███████╗████████╗
    ██╔══██╗██╔═══██╗██║     ██╔════╝╚══██╔══╝
-   ██║  ██║██║   ██║██║     █████╗     ██║
-   ██║  ██║██║   ██║██║     ██╔══╝     ██║
-   ██████╔╝╚██████╔╝███████╗███████╗   ██║
-   ╚═════╝  ╚═════╝ ╚══════╝╚══════╝   ╚═╝
+   ██║  ██║██║   ██║██║     █████╗     ██║   
+   ██║  ██║██║   ██║██║     ██╔══╝     ██║   
+   ██████╔╝╚██████╔╝███████╗███████╗   ██║   
+   ╚═════╝  ╚═════╝ ╚══════╝╚══════╝   ╚═╝  
 """
 # ==========================================
 # File I/O (using FileOps library)
@@ -11984,12 +11968,14 @@ fun replace_extension(path: str, new_ext: str) -> str:
 
     base: str = path
     if dot_pos >= 0:
-        zero: i64 = 0
-        base = str_from_range(path, zero, dot_pos)
+        base = str_from_range(path, 0 as i64, dot_pos)
     return Str.concat(base, new_ext)
 
 # ==========================================
 # Platform Config
+# ==========================================
+# Reads library/platform/<name>/platform.conf at startup.
+# The compiler itself knows NO platform names — just reads the config.
 # ==========================================
 g_plat_translate: str = ""
 g_plat_compile: str = ""
@@ -12060,6 +12046,9 @@ fun load_platform_config(exe_dir: str, plat_name: str) -> i32:
     if conf_len == 0:
         IOOps.io_println(Str.concat("Error: Cannot read platform config: ", conf_path))
         return 0
+
+    # Parse simple INI: skip comments (#) and sections ([...]), read key = value
+    # IMPORTANT: all vars hoisted out of loop to avoid alloca-in-loop stack overflow
     ci: i64 = 0
     line_start: i64 = 0
     cc: i8 = 0 as i8
@@ -12130,7 +12119,9 @@ fun load_platform_config(exe_dir: str, plat_name: str) -> i32:
     return 1
 
 fun detect_current_platform() -> str:
+    # Check if running on Windows or Linux by testing exe path
     exe_path: str = PathOps.get_exe_path()
+    # If path contains backslash or drive letter, it's Windows
     ep_len: i64 = Memory.strlen(exe_path)
     pi: i64 = 0
     while pi < ep_len:
@@ -12141,6 +12132,8 @@ fun detect_current_platform() -> str:
     return "linux"
 
 fun str_replace(template: str, placeholder: str, value: str) -> str:
+    # Replace first occurrence of placeholder in template with value
+    # IMPORTANT: all vars hoisted to avoid alloca-in-loop
     tlen: i64 = Memory.strlen(template)
     plen: i64 = Memory.strlen(placeholder)
     if plen == 0 or tlen == 0:
@@ -12176,6 +12169,7 @@ fun str_replace(template: str, placeholder: str, value: str) -> str:
     return template
 
 fun build_defaultlib_flags(libs_csv: str, flag_template: str) -> str:
+    # IMPORTANT: all vars hoisted to avoid alloca-in-loop
     result: str = ""
     csv_len: i64 = Memory.strlen(libs_csv)
     if csv_len == 0:
@@ -12223,6 +12217,9 @@ fun build_defaultlib_flags(libs_csv: str, flag_template: str) -> str:
 # ==========================================
 # Library Module Registry
 # ==========================================
+# Reads library/mod.dlt to build a name->path lookup table.
+# Format: "module <name> = <relative_path>"
+# ==========================================
 g_lib_reg_names: i64 = 0
 g_lib_reg_paths: i64 = 0
 g_lib_reg_count: i32 = 0
@@ -12233,6 +12230,7 @@ fun init_library_registry():
     g_lib_reg_count = 0
 
 fun load_library_registry(library_root: str):
+    # Read library/mod.dlt
     reg_path: str = Str.concat(library_root, "mod.dlt")
     reg_content: str = read_file_to_string(reg_path)
     if Memory.strlen(reg_content) == 0:
@@ -12248,6 +12246,7 @@ fun load_library_registry(library_root: str):
             rc = Memory.read_i8((reg_content as i64) + ri)
         if rc == 10 or rc == 13 or ri == rlen:
             rline_len: i64 = ri - rline_start
+            # Check for "module " prefix (7 chars): m=109 o=111 d=100 u=117 l=108 e=101 ' '=32
             if rline_len > 7:
                 rm0: i8 = Memory.read_i8((reg_content as i64) + rline_start)
                 rm1: i8 = Memory.read_i8((reg_content as i64) + rline_start + 1)
@@ -12272,6 +12271,7 @@ fun load_library_registry(library_root: str):
                         # Extract path: from rline_start+7 to as_pos, trimmed
                         rp_start: i64 = rline_start + 7
                         rp_end: i64 = as_pos
+                        # Trim trailing spaces from path
                         while rp_end > rp_start:
                             rpc2: i8 = Memory.read_i8((reg_content as i64) + rp_end - 1)
                             if rpc2 != 32 and rpc2 != 9:
@@ -12279,12 +12279,14 @@ fun load_library_registry(library_root: str):
                             rp_end = rp_end - 1
                         # Extract name: from as_pos+4 to ri, trimmed
                         rn_start: i64 = as_pos + 4
+                        # Trim leading spaces from name
                         while rn_start < ri:
                             rpc: i8 = Memory.read_i8((reg_content as i64) + rn_start)
                             if rpc != 32 and rpc != 9:
                                 break
                             rn_start = rn_start + 1
                         rn_end: i64 = ri
+                        # Trim trailing whitespace/CR from name
                         while rn_end > rn_start:
                             rnc: i8 = Memory.read_i8((reg_content as i64) + rn_end - 1)
                             if rnc != 32 and rnc != 13 and rnc != 9:
@@ -12292,7 +12294,9 @@ fun load_library_registry(library_root: str):
                             rn_end = rn_end - 1
                         if rn_end > rn_start and rp_end > rp_start:
                             reg_name: str = str_from_range(reg_content, rn_start, rn_end)
+                            # Append .dlt to path
                             reg_rel: str = Str.concat(str_from_range(reg_content, rp_start, rp_end), ".dlt")
+                            # Convert '/' to '\' in path
                             reg_win_path: str = ""
                             rwi: i64 = 0
                             rwlen: i64 = Memory.strlen(reg_rel)
@@ -12306,6 +12310,7 @@ fun load_library_registry(library_root: str):
                                     Memory.write_i8(rwbuf, rwc)
                                     reg_win_path = Str.concat(reg_win_path, rwbuf as str)
                                 rwi = rwi + 1
+                            # Store in registry
                             Memory.write_i64(g_lib_reg_names + ((g_lib_reg_count as i64) * 8), reg_name as i64)
                             Memory.write_i64(g_lib_reg_paths + ((g_lib_reg_count as i64) * 8), reg_win_path as i64)
                             g_lib_reg_count = g_lib_reg_count + 1
@@ -12317,6 +12322,7 @@ fun load_library_registry(library_root: str):
         ri = ri + 1
 
 fun lookup_library_registry(mod_name: str) -> str:
+    # Returns the relative mod.dlt path for the given module name, or "" if not found
     lri: i32 = 0
     while lri < g_lib_reg_count:
         rn: str = Memory.read_i64(g_lib_reg_names + ((lri as i64) * 8)) as str
@@ -12356,6 +12362,7 @@ fun load_file_with_deps(library_root: str, rel_path: str) -> str:
         return ""
     mark_file_loaded(rel_path)
 
+    # Convert '/' to '\' in rel_path
     win_path: str = ""
     wpi: i64 = 0
     wplen: i64 = Memory.strlen(rel_path)
@@ -12375,6 +12382,7 @@ fun load_file_with_deps(library_root: str, rel_path: str) -> str:
     if Memory.strlen(file_src) == 0:
         return ""
 
+    # Scan first lines for "requires " directives
     deps_src: str = ""
     fslen: i64 = Memory.strlen(file_src)
     fsi: i64 = 0
@@ -12385,6 +12393,7 @@ fun load_file_with_deps(library_root: str, rel_path: str) -> str:
             fsc = Memory.read_i8((file_src as i64) + fsi)
         if fsc == 10 or fsc == 13 or fsi == fslen:
             fs_line_len: i64 = fsi - fs_line_start
+            # Check "requires " (9 chars): r=114 e=101 q=113 u=117 i=105 r=114 e=101 s=115 ' '=32
             if fs_line_len > 9:
                 dr0: i8 = Memory.read_i8((file_src as i64) + fs_line_start)
                 dr1: i8 = Memory.read_i8((file_src as i64) + fs_line_start + 1)
@@ -12410,9 +12419,12 @@ fun load_file_with_deps(library_root: str, rel_path: str) -> str:
                         dep_src: str = load_file_with_deps(library_root, dep_path)
                         if Memory.strlen(dep_src) > 0:
                             deps_src = Str.concat(deps_src, Str.concat("\n", dep_src))
+            # Stop scanning for requires at first non-comment, non-requires, non-empty line
             if fs_line_len > 0:
                 fc0: i8 = Memory.read_i8((file_src as i64) + fs_line_start)
+                # '#'=35 for comments, 'r'=114 for requires
                 if fc0 != 35 and fc0 != 114 and fc0 != 13 and fc0 != 10:
+                    # Reached actual code, stop scanning
                     if fsc == 13 and (fsi + 1) < fslen:
                         fnr: i8 = Memory.read_i8((file_src as i64) + fsi + 1)
                         if fnr == 10:
@@ -12447,6 +12459,7 @@ fun resolve_expose_path(library_root: str, mod_rel_path: str, sub_name: str) -> 
             mcc = Memory.read_i8((mod_content as i64) + mci)
         if mcc == 10 or mcc == 13 or mci == mclen:
             mc_line_len: i64 = mci - mc_line_start
+            # Check "expose " prefix (7 chars): e=101 x=120 p=112 o=111 s=115 e=101 ' '=32
             if mc_line_len > 7:
                 ex0: i8 = Memory.read_i8((mod_content as i64) + mc_line_start)
                 ex1: i8 = Memory.read_i8((mod_content as i64) + mc_line_start + 1)
@@ -12512,9 +12525,8 @@ fun scan_selective_std_imports(user_src: str, library_root: str) -> str:
     mod_path: str = "std\\mod.dlt"
     # Platform mod.dlt for fallback expose resolution
     plat_mod_path: str = Str.concat("platform\\", Str.concat(g_plat_name, "\\mod.dlt"))
-
-    # Hoist all declarations before loop
-    sc: i8 = 0
+    # Hoisted from loop to avoid alloca-in-loop stack overflow
+    sc: i8 = 0 as i8
     s_line_len: i64 = 0
     si0: i8 = 0 as i8
     si1: i8 = 0 as i8
@@ -12547,11 +12559,12 @@ fun scan_selective_std_imports(user_src: str, library_root: str) -> str:
     snr: i8 = 0 as i8
 
     while si <= slen:
-        sc = 0
+        sc = 0 as i8
         if si < slen:
             sc = Memory.read_i8((user_src as i64) + si)
         if sc == 10 or sc == 13 or si == slen:
             s_line_len = si - s_line_start
+            # Check "import std." (11 chars): i=105 m=109 p=112 o=111 r=114 t=116 ' '=32 s=115 t=116 d=100 .=46
             if s_line_len > 11:
                 si0 = Memory.read_i8((user_src as i64) + s_line_start)
                 si1 = Memory.read_i8((user_src as i64) + s_line_start + 1)
@@ -12565,14 +12578,17 @@ fun scan_selective_std_imports(user_src: str, library_root: str) -> str:
                 si9 = Memory.read_i8((user_src as i64) + s_line_start + 9)
                 si10 = Memory.read_i8((user_src as i64) + s_line_start + 10)
                 if si0 == 105 and si1 == 109 and si2 == 112 and si3 == 111 and si4 == 114 and si5 == 116 and si6 == 32 and si7 == 115 and si8 == 116 and si9 == 100 and si10 == 46:
+                    # Found "import std." — extract what comes after
                     after_dot = s_line_start + 11
                     next_ch = Memory.read_i8((user_src as i64) + after_dot)
                     if next_ch == 91:
+                        # Bracket syntax: import std.[name1, name2]
                         bi = after_dot + 1
                         name_start = bi
                         while bi < si:
                             bc = Memory.read_i8((user_src as i64) + bi)
                             if bc == 44 or bc == 93:
+                                # Trim name
                                 ns = name_start
                                 ne = bi
                                 while ns < ne:
@@ -12600,6 +12616,7 @@ fun scan_selective_std_imports(user_src: str, library_root: str) -> str:
                                     break
                             bi = bi + 1
                     else:
+                        # Single name: import std.name
                         sn_end = si
                         while sn_end > after_dot:
                             snc = Memory.read_i8((user_src as i64) + sn_end - 1)
@@ -12671,6 +12688,7 @@ fun load_module(library_root: str, mod_rel_path: str) -> str:
             c = Memory.read_i8((mod_content as i64) + i)
         if c == 10 or c == 13 or i == slen:
             line_len: i64 = i - line_start
+            # Check for "private " prefix (8 chars): 'p'=112 'r'=114 'i'=105 'v'=118 'a'=97 't'=116 'e'=101 ' '=32
             if line_len > 8:
                 p0: i8 = Memory.read_i8((mod_content as i64) + line_start)
                 p1: i8 = Memory.read_i8((mod_content as i64) + line_start + 1)
@@ -12760,6 +12778,7 @@ fun load_module(library_root: str, mod_rel_path: str) -> str:
                         # Check if last component matches a private name
                         is_priv: i32 = 0
                         if priv_count > 0:
+                            # Extract last component of rel_path (after last '/')
                             last_comp: str = rel_path
                             lci: i64 = Memory.strlen(rel_path) - 1
                             while lci >= 0:
@@ -12838,10 +12857,6 @@ fun load_module(library_root: str, mod_rel_path: str) -> str:
                                 ri = ri + 1
                             req_mod_file: str = Str.concat(req_path, "\\mod.dlt")
                             req_src: str = load_module(library_root, req_mod_file)
-                            if Memory.strlen(req_src) == 0:
-                                # Try packages directory
-                                pkg_root: str = Str.concat(library_root, "..\\packages\\")
-                                req_src = load_module(pkg_root, req_mod_file)
                             if Memory.strlen(req_src) > 0:
                                 result = Str.concat(result, req_src)
 
@@ -12859,7 +12874,8 @@ fun has_import_std(src: str) -> i32:
     slen: i64 = Memory.strlen(src)
     i: i64 = 0
     line_start: i64 = 0
-    c: i8 = 0
+    # Hoisted from loop to avoid alloca-in-loop stack overflow
+    c: i8 = 0 as i8
     line_len: i64 = 0
     b0: i8 = 0 as i8
     b1: i8 = 0 as i8
@@ -12874,7 +12890,7 @@ fun has_import_std(src: str) -> i32:
     next_c: i8 = 0 as i8
     nr: i8 = 0 as i8
     while i <= slen:
-        c = 0
+        c = 0 as i8
         if i < slen:
             c = Memory.read_i8((src as i64) + i)
         if c == 10 or c == 13 or i == slen:
@@ -13009,9 +13025,8 @@ fun resolve_and_load_imports(user_src: str, std_base: str, src_dir: str) -> str:
     slen: i64 = Memory.strlen(user_src)
     i: i64 = 0
     line_start: i64 = 0
-
-    # Hoist all variable declarations before the loop to avoid alloca-in-loop
-    c: i8 = 0
+    # Hoisted from loop to avoid alloca-in-loop stack overflow
+    c: i8 = 0 as i8
     line_len: i64 = 0
     i0: i8 = 0 as i8
     i1: i8 = 0 as i8
@@ -13059,7 +13074,7 @@ fun resolve_and_load_imports(user_src: str, std_base: str, src_dir: str) -> str:
     nr: i8 = 0 as i8
 
     while i <= slen:
-        c = 0
+        c = 0 as i8
         if i < slen:
             c = Memory.read_i8((user_src as i64) + i)
         # End of line or end of string
@@ -13122,9 +13137,11 @@ fun resolve_and_load_imports(user_src: str, std_base: str, src_dir: str) -> str:
                             if already == 0:
                                 resolved = try_resolve_module(mod_name, std_base, src_dir)
                                 if Memory.strlen(resolved) > 0:
+                                    # Check if resolved is a mod.dlt — needs load_module processing
                                     rlen = Memory.strlen(resolved)
                                     is_mod = 0
                                     if rlen > 7:
+                                        # Check if ends with "mod.dlt" (7 chars)
                                         m1 = Memory.read_i8((resolved as i64) + rlen - 7)
                                         m2 = Memory.read_i8((resolved as i64) + rlen - 6)
                                         m3 = Memory.read_i8((resolved as i64) + rlen - 5)
@@ -13136,9 +13153,12 @@ fun resolve_and_load_imports(user_src: str, std_base: str, src_dir: str) -> str:
                                             is_mod = 1
                                     mod_src = ""
                                     if is_mod == 1:
+                                        # Compute library_root: resolved minus mod_name_path/mod.dlt
+                                        # Build mod_name as path: dots -> backslashes
                                         mn_path = ""
                                         mni = 0
                                         mn_len = Memory.strlen(mod_name)
+                                        mnc = 0 as i8
                                         while mni < mn_len:
                                             mnc = Memory.read_i8((mod_name as i64) + mni)
                                             if mnc == 46:
@@ -13149,7 +13169,7 @@ fun resolve_and_load_imports(user_src: str, std_base: str, src_dir: str) -> str:
                                             mni = mni + 1
                                         mod_rel = Str.concat(mn_path, "\\mod.dlt")
                                         mr_len = Memory.strlen(mod_rel)
-                                        lib_root = str_from_range(resolved, 0 as i64, rlen - mr_len)
+                                        lib_root = str_from_range(resolved, 0, rlen - mr_len)
                                         mod_src = load_module(lib_root, mod_rel)
                                     else:
                                         mod_src = read_file_to_string(resolved)
@@ -13166,7 +13186,7 @@ fun resolve_and_load_imports(user_src: str, std_base: str, src_dir: str) -> str:
                                         while fc_i < fc_len:
                                             fc_c = Memory.read_i8((mod_name as i64) + fc_i)
                                             if fc_c == 46:
-                                                first_comp = str_from_range(mod_name, 0 as i64, fc_i)
+                                                first_comp = str_from_range(mod_name, 0, fc_i)
                                                 break
                                             fc_i = fc_i + 1
                                         register_module_name(first_comp)
@@ -13195,15 +13215,14 @@ fun path_base_name(path: str) -> str:
             break
         i = i - 1
     if dot_pos >= 0:
-        return str_from_range(path, 0 as i64, dot_pos)
+        return str_from_range(path, 0, dot_pos)
     return path
 
 # ==========================================
 # File Delete Helper
 # ==========================================
 fun delete_file(path: str):
-    cmd: str = Str.concat(Str.concat("cmd /c del \"", path), "\" >nul 2>nul")
-    Process.run(cmd)
+    DeleteFileA(path)
 
 # ==========================================
 # Extract extern lib names from source code
@@ -13373,9 +13392,6 @@ fun extract_pkg_libpaths(src: str, pkg_base: str) -> str:
                             pkg_dir = Str.concat(pkg_base, mod_name)
                             lp_flag: str = str_replace(g_plat_flag_libpath, "{path}", Str.concat("\"", Str.concat(pkg_dir, "\"")))
                             result = Str.concat(result, Str.concat(" ", lp_flag))
-                            plat_pkg_dir: str = Str.concat(pkg_dir, Str.concat("\\", g_plat_name))
-                            lp_flag2: str = str_replace(g_plat_flag_libpath, "{path}", Str.concat("\"", Str.concat(plat_pkg_dir, "\"")))
-                            result = Str.concat(result, Str.concat(" ", lp_flag2))
                             Memory.write_i64(added_names + ((added_count as i64) * 8), mod_name as i64)
                             added_count = added_count + 1
                 i = name_end + 1
@@ -13426,9 +13442,6 @@ fun extract_pkg_libpaths(src: str, pkg_base: str) -> str:
                             pkg_dir = Str.concat(pkg_base, mod_name)
                             lp_flag: str = str_replace(g_plat_flag_libpath, "{path}", Str.concat("\"", Str.concat(pkg_dir, "\"")))
                             result = Str.concat(result, Str.concat(" ", lp_flag))
-                            plat_pkg_dir: str = Str.concat(pkg_dir, Str.concat("\\", g_plat_name))
-                            lp_flag2: str = str_replace(g_plat_flag_libpath, "{path}", Str.concat("\"", Str.concat(plat_pkg_dir, "\"")))
-                            result = Str.concat(result, Str.concat(" ", lp_flag2))
                             Memory.write_i64(added_names + ((added_count as i64) * 8), mod_name as i64)
                             added_count = added_count + 1
                 i = name_end + 1
@@ -13458,6 +13471,7 @@ fun main() -> i32:
         IOOps.io_println("  --keep-llvm        Keep intermediate .ll file")
         IOOps.io_println("  --no-runtime       Don't auto-import runtime libraries")
         IOOps.io_println("  --no-console       GUI mode (no console window)")
+        IOOps.io_println("  --version          Show compiler version")
         return 1
 
     # Parse arguments
@@ -13472,7 +13486,10 @@ fun main() -> i32:
     ai: i32 = 1
     while ai < argc:
         arg: str = Args.get(ai)
-        if str_eq(arg, "--no-runtime") == 1:
+        if str_eq(arg, "--version") == 1:
+            IOOps.io_println("Dolet Compiler v1.2.0-beta")
+            return 0
+        elif str_eq(arg, "--no-runtime") == 1:
             no_runtime = 1
         elif str_eq(arg, "--keep-mlir") == 1:
             keep_mlir = 1
@@ -13508,8 +13525,6 @@ fun main() -> i32:
         IOOps.io_println(Str.concat("Error: Unknown platform '", Str.concat(target_platform, "'")))
         return 1
     IOOps.io_println(Str.concat("Platform: ", g_plat_name))
-
-    sep: str = g_plat_separator
 
     # Derive paths using platform config
     base_path: str = path_base_name(input_path)
@@ -13555,6 +13570,7 @@ fun main() -> i32:
     source: str = ""
 
     # Load library module registry
+    sep: str = g_plat_separator
     library_root: str = Str.concat(exe_dir, Str.concat(sep, Str.concat("..", Str.concat(sep, Str.concat("library", sep)))))
     init_library_registry()
     load_library_registry(library_root)
@@ -13568,7 +13584,7 @@ fun main() -> i32:
         mark_file_loaded("prelude/annotations")
         IOOps.io_println(Str.concat("Prelude: ", Str.concat(Convert.i64_to_str(prelude_len), " chars")))
 
-    # Build platform-relative path prefix
+    # Build platform-relative path prefix (e.g. "platform/windows/")
     plat_prefix: str = Str.concat("platform/", Str.concat(g_plat_name, "/"))
 
     if no_runtime == 0:
@@ -13673,12 +13689,13 @@ fun main() -> i32:
         runtime_helpers: str = Str.concat(sys_libs, Str.concat(sep, g_plat_runtime_helpers))
         cmd3 = Str.concat(cmd3, Str.concat(Str.concat("\"", runtime_helpers), "\" "))
 
-    # Output flag
+    # Output flag (e.g. "-out:{path}" or "-o {path}")
     out_flag: str = Str.concat(Str.concat("\"", output_exe), "\"")
+    # Replace {path} in flag template
     flag_out: str = str_replace(g_plat_flag_output, "{path}", out_flag)
     cmd3 = Str.concat(cmd3, Str.concat(flag_out, " "))
 
-    # Libpath flag
+    # Libpath flag (e.g. "-libpath:{path}" or "-L{path}")
     lib_flag: str = Str.concat(Str.concat("\"", sys_libs), "\"")
     flag_lp: str = str_replace(g_plat_flag_libpath, "{path}", lib_flag)
     cmd3 = Str.concat(cmd3, Str.concat(flag_lp, " "))
@@ -13688,7 +13705,7 @@ fun main() -> i32:
     pkg_libpaths: str = extract_pkg_libpaths(source, pkg_base2)
     cmd3 = Str.concat(cmd3, Str.concat(pkg_libpaths, " "))
 
-    # Default libs from config
+    # Default libs from config (e.g. "kernel32, ws2_32, msvcrt-math")
     default_lib_flags: str = build_defaultlib_flags(g_plat_default_libs, g_plat_flag_defaultlib)
     cmd3 = Str.concat(cmd3, Str.concat(default_lib_flags, " "))
 
